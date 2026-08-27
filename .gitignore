@@ -1,0 +1,45 @@
+# =========================
+# IEEE-CIS DATA
+# =========================
+data/raw/
+data/interim/
+data/processed/
+data/synthetic/
+
+# =========================
+# Python
+# =========================
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Models / Large Artifacts
+# =========================
+models/*.pkl
+models/*.joblib
+models/*.onnx
+
+# =========================
+# IDE
+# =========================
+.vscode/
+
+# =========================
+# OS
+# =========================
+.DS_Store
+Thumbs.db
