@@ -1,0 +1,27 @@
+# Chronological partition boundaries for Phase B onward.
+#
+# Day index = TransactionDT // seconds_per_day (see configs/data.yaml). All
+# ranges are inclusive day indices. Fixed by explicit decision -- NOT derived
+# by searching for a boundary that optimizes fraud rate or any label-based
+# objective. Phase A confirmed the dataset spans day 1-182.
+#
+# `holdout` is reserved for Phase H. Phase B code may only confirm its
+# structural existence (non-empty, chronologically after validation, no
+# overlap) -- never its fraud rate, drift, correlations, or any other
+# content statistic.
+partitions:
+  train:
+    start_day: 1
+    end_day: 130
+  embargo_1:
+    start_day: 131
+    end_day: 137
+  validation:
+    start_day: 138
+    end_day: 160
+  embargo_2:
+    start_day: 161
+    end_day: 167
+  holdout:
+    start_day: 168
+    end_day: 182
