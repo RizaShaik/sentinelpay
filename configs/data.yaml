@@ -1,0 +1,104 @@
+# Paths are relative to the project root.
+paths:
+  raw_dir: data/raw
+  interim_dir: data/interim
+  processed_dir: data/processed
+  reports_dir: reports
+
+files:
+  train_transaction: train_transaction.csv
+  train_identity: train_identity.csv
+  test_transaction: test_transaction.csv
+  test_identity: test_identity.csv
+
+# TransactionDT is a timedelta in seconds from an undisclosed reference
+# datetime (NOT a real timestamp). Officially documented by the host; see
+# reports/eda for citations. One "day" bucket = 86400 seconds.
+temporal:
+  dt_column: TransactionDT
+  seconds_per_day: 86400
+  total_span_days: 182
+
+join:
+  key: TransactionID
+
+# Columns confirmed categorical (string-valued) by direct inspection of the
+# transaction file header row. This list is deliberately NOT extended to the
+# identity file's id_12-id_38 block: a generic web summary claims that whole
+# block is categorical, but direct inspection of sample rows shows it mixes
+# categorical strings (id_12, id_15, id_16, id_28-id_31, id_33-id_38,
+# DeviceType, DeviceInfo) with numeric fields (id_14, id_17, id_19, id_20,
+# id_32, ...). Rather than hand-curate a second list that could as easily be
+# wrong, the loader infers identity dtypes from the data itself (pandas
+# object dtype -> category candidate) instead of trusting this file for it.
+known_categorical:
+  transaction:
+    - ProductCD
+    - card4
+    - card6
+    - P_emaildomain
+    - R_emaildomain
+    - M1
+    - M2
+    - M3
+    - M4
+    - M5
+    - M6
+    - M7
+    - M8
+    - M9
+
+# Correlation-analysis cost control. A full k-by-k `.corr()` over all ~390
+# numeric columns is expensive (observed ~5.4GB peak RSS / ~2.5min) and is
+# NOT run by default. "curated" restricts routine target-correlation checks
+# to a small, well-understood non-V column set; V1-V339 are handled
+# separately (grouped by shared missingness signature, not dumped in raw).
+# mode: full is opt-in only, for a deliberate deeper leakage pass.
+correlation:
+  mode: curated  # curated | full
+  curated_columns:
+    - TransactionAmt
+    - C1
+    - C2
+    - C3
+    - C4
+    - C5
+    - C6
+    - C7
+    - C8
+    - C9
+    - C10
+    - C11
+    - C12
+    - C13
+    - C14
+    - D1
+    - D2
+    - D3
+    - D4
+    - D5
+    - D6
+    - D7
+    - D8
+    - D9
+    - D10
+    - D11
+    - D12
+    - D13
+    - D14
+    - D15
+
+# Candidate entity-relationship proxy keys (Phase A exploratory evidence
+# only -- see src/sentinelpay/eda/entity.py). Neither IEEE-CIS nor Vesta
+# publishes a real customer/device ID; these are reasonable groupings, not
+# confirmed real-world entities, and must not be treated as such.
+proxy_keys:
+  payment_proxy_key:
+    - card1
+    - card2
+    - card3
+    - card5
+    - addr1
+  device_proxy_key:
+    - DeviceInfo
+    - id_31
