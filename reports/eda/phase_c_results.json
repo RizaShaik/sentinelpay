@@ -1,0 +1,236 @@
+{
+  "split_config": {
+    "train": {
+      "start_day": 1,
+      "end_day": 130
+    },
+    "embargo_1": {
+      "start_day": 131,
+      "end_day": 137
+    },
+    "validation": {
+      "start_day": 138,
+      "end_day": 160
+    },
+    "embargo_2": {
+      "start_day": 161,
+      "end_day": 167
+    },
+    "holdout": {
+      "start_day": 168,
+      "end_day": 182
+    }
+  },
+  "n_rows_total": 590540,
+  "n_rows_development": 549899,
+  "n_rows_holdout_excluded": 40641,
+  "feature_registry": [
+    {
+      "feature": "amt_log1p",
+      "source_columns": [
+        "TransactionAmt"
+      ],
+      "uses_target": false,
+      "temporal_dependency": "row-local",
+      "description": "log1p(TransactionAmt) -- variance-stabilizing transform of a documented, always-populated field."
+    },
+    {
+      "feature": "amt_decimal_part",
+      "source_columns": [
+        "TransactionAmt"
+      ],
+      "uses_target": false,
+      "temporal_dependency": "row-local",
+      "description": "TransactionAmt - floor(TransactionAmt); distinguishes round-dollar vs. exact-cent amounts."
+    },
+    {
+      "feature": "dt_hour_of_day",
+      "source_columns": [
+        "TransactionDT"
+      ],
+      "uses_target": false,
+      "temporal_dependency": "row-local",
+      "description": "(TransactionDT // 3600) % 24 -- cyclical time-of-day bucket from the row's own timestamp only."
+    },
+    {
+      "feature": "dt_day_of_week",
+      "source_columns": [
+        "TransactionDT"
+      ],
+      "uses_target": false,
+      "temporal_dependency": "row-local",
+      "description": "(TransactionDT // 86400) % 7 -- cyclical period-7 bucket; not a claimed calendar weekday (epoch undisclosed)."
+    },
+    {
+      "feature": "has_identity",
+      "source_columns": [
+        "TransactionID"
+      ],
+      "uses_target": false,
+      "temporal_dependency": "structural-join",
+      "description": "Whether TransactionID has a matching identity-file row; existence only, no identity-table value used."
+    }
+  ],
+  "feature_summary_by_partition": [
+    {
+      "partition": "train",
+      "feature": "amt_log1p",
+      "mean": 4.3844194412231445,
+      "std": 0.9330232739448547,
+      "pct_missing": 0.0,
+      "n_rows": 445173
+    },
+    {
+      "partition": "train",
+      "feature": "amt_decimal_part",
+      "mean": 0.37315312027931213,
+      "std": 0.43157872557640076,
+      "pct_missing": 0.0,
+      "n_rows": 445173
+    },
+    {
+      "partition": "train",
+      "feature": "dt_hour_of_day",
+      "mean": 13.825465605506174,
+      "std": 7.676278926815764,
+      "pct_missing": 0.0,
+      "n_rows": 445173
+    },
+    {
+      "partition": "train",
+      "feature": "dt_day_of_week",
+      "mean": 2.930065390308936,
+      "std": 2.015257080033128,
+      "pct_missing": 0.0,
+      "n_rows": 445173
+    },
+    {
+      "partition": "train",
+      "feature": "has_identity",
+      "mean": 0.2592430358534772,
+      "std": 0.4382197115488742,
+      "pct_missing": 0.0,
+      "n_rows": 445173
+    },
+    {
+      "partition": "embargo_1",
+      "feature": "amt_log1p",
+      "mean": 4.348246097564697,
+      "std": 0.9580116271972656,
+      "pct_missing": 0.0,
+      "n_rows": 18589
+    },
+    {
+      "partition": "embargo_1",
+      "feature": "amt_decimal_part",
+      "mean": 0.41504573822021484,
+      "std": 0.44224298000335693,
+      "pct_missing": 0.0,
+      "n_rows": 18589
+    },
+    {
+      "partition": "embargo_1",
+      "feature": "dt_hour_of_day",
+      "mean": 13.931464844800688,
+      "std": 7.4903735876297555,
+      "pct_missing": 0.0,
+      "n_rows": 18589
+    },
+    {
+      "partition": "embargo_1",
+      "feature": "dt_day_of_week",
+      "mean": 3.0242078648663187,
+      "std": 2.0395158338432213,
+      "pct_missing": 0.0,
+      "n_rows": 18589
+    },
+    {
+      "partition": "embargo_1",
+      "feature": "has_identity",
+      "mean": 0.1855936306417774,
+      "std": 0.38878884554963095,
+      "pct_missing": 0.0,
+      "n_rows": 18589
+    },
+    {
+      "partition": "validation",
+      "feature": "amt_log1p",
+      "mean": 4.392000198364258,
+      "std": 0.9423633813858032,
+      "pct_missing": 0.0,
+      "n_rows": 65193
+    },
+    {
+      "partition": "validation",
+      "feature": "amt_decimal_part",
+      "mean": 0.4159320592880249,
+      "std": 0.44472381472587585,
+      "pct_missing": 0.0,
+      "n_rows": 65193
+    },
+    {
+      "partition": "validation",
+      "feature": "dt_hour_of_day",
+      "mean": 13.938735753838602,
+      "std": 7.400733131284284,
+      "pct_missing": 0.0,
+      "n_rows": 65193
+    },
+    {
+      "partition": "validation",
+      "feature": "dt_day_of_week",
+      "mean": 3.2321414875830228,
+      "std": 2.098641121414858,
+      "pct_missing": 0.0,
+      "n_rows": 65193
+    },
+    {
+      "partition": "validation",
+      "feature": "has_identity",
+      "mean": 0.17423649778350436,
+      "std": 0.37931563059592976,
+      "pct_missing": 0.0,
+      "n_rows": 65193
+    },
+    {
+      "partition": "embargo_2",
+      "feature": "amt_log1p",
+      "mean": 4.3501129150390625,
+      "std": 0.9605615735054016,
+      "pct_missing": 0.0,
+      "n_rows": 20944
+    },
+    {
+      "partition": "embargo_2",
+      "feature": "amt_decimal_part",
+      "mean": 0.3785581886768341,
+      "std": 0.4350205957889557,
+      "pct_missing": 0.0,
+      "n_rows": 20944
+    },
+    {
+      "partition": "embargo_2",
+      "feature": "dt_hour_of_day",
+      "mean": 14.001862108479756,
+      "std": 7.281526210188487,
+      "pct_missing": 0.0,
+      "n_rows": 20944
+    },
+    {
+      "partition": "embargo_2",
+      "feature": "dt_day_of_week",
+      "mean": 3.002482811306341,
+      "std": 1.996031383317476,
+      "pct_missing": 0.0,
+      "n_rows": 20944
+    },
+    {
+      "partition": "embargo_2",
+      "feature": "has_identity",
+      "mean": 0.2610294117647059,
+      "std": 0.43920640744620487,
+      "pct_missing": 0.0,
+      "n_rows": 20944
+    }
+  ]
+}

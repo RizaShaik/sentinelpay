@@ -322,6 +322,131 @@ detector is a Phase D decision.
 """
 
 
+_PHASE_C_SCOPE_SECTION = """
+## Scope (what Phase C is, and deliberately is not)
+
+Phase C is a non-target, chronology-safe **feature foundation**, not a
+broad model-ready feature expansion. Explicitly out of scope, per review of
+the original (broader) Phase C proposal:
+
+- **No target encoding of any kind.** Nothing below reads or depends on
+  `isFraud`; `sentinelpay.features.build_feature_frame` does not accept a
+  target column. A future target-derived historical feature is deferred
+  until Phase D/E architecture (including embargo width) is settled.
+- **No V1-V339 handling** -- no raw passthrough, no block aggregates.
+- **No `data/processed/*_features.parquet` persistence** -- features are
+  built in memory, validated, and reported only.
+- **No production grouping-key selection.** `sentinelpay.data.history`'s
+  historical utilities are generic and covered by unit tests only (synthetic
+  group keys) -- see section below. `payment_proxy_key`/`device_proxy_key`/
+  `ProductCD` are not used anywhere in Phase C.
+- **One unified feature pipeline** -- a single `has_identity` indicator, not
+  parallel with/without-identity feature sets.
+- **`configs/split.yaml` boundaries and embargo widths are unchanged.**
+"""
+
+_PHASE_C_HISTORY_SECTION = """
+## Historical utilities (`sentinelpay.data.history`) -- not applied to real data in Phase C
+
+Three generic, target-agnostic causal aggregation functions are implemented
+and unit-tested (`tests/test_history.py`), but are **not called against real
+data** in this phase -- there is no approved production grouping key yet
+(see scope above), and demonstrating them against a real column (as Phase B
+did for the day-bucket rollup utilities) is exactly what review of the
+original proposal disallowed.
+
+- `prior_group_count`, `prior_group_amount_stats`, `time_since_last_group_event`.
+- **Guarantee**: for row i, only same-group rows with `TransactionDT`
+  strictly less than row i's ever contribute to row i's result. Two rows
+  sharing a group and an identical `TransactionDT` never see each other.
+  Row order in the input never matters, and `TransactionID` is never used as
+  a tie-breaker.
+- **Test coverage**: tie handling, adversarial perturbation (mutating or
+  adding a future row leaves every earlier row's result unchanged),
+  row-order independence, and no-target-dependency are all asserted in
+  `tests/test_history.py` against synthetic group keys only.
+
+**Embargo note**: these are non-target aggregates (count/sum/mean of
+`TransactionAmt`, recency), not fraud-rate statistics. `embargo_1` rows
+chronologically precede `validation` rows, so they DO contribute to a
+validation row's historical aggregate -- the 7-day embargo exists to guard a
+*label-based* boundary decision against undocumented D-column lookback
+windows (see reports/eda/phase_b_report.md section 3), not to blank out real
+antecedent transaction content from non-target feature computation.
+Excluding embargo rows would only make early-validation historical features
+artificially sparse relative to real scoring-time behavior. This reasoning
+does NOT extend to any future target-derived historical feature -- that is
+exactly the case the embargo protects against, and none is implemented here.
+Holdout rows are loaded into memory along with everything else (they share
+`train_transaction.csv` with every other partition -- there is no way to read
+the file without them), but are excluded via `assign_partition` immediately
+after loading and before any content computation, including before
+`build_feature_frame` is ever called (see section 2 above). So this question
+does not arise for holdout: no content statistic, historical or otherwise, is
+ever computed on a holdout row in Phase C.
+"""
+
+
+def render_phase_c_report(results: dict, report_path: Path) -> None:
+    registry = results["feature_registry"]
+    summary = results["feature_summary_by_partition"]
+    split_config = results["split_config"]
+
+    lines: list[str] = []
+    lines.append("# SentinelPay -- Phase C Non-Target Feature Foundation Report")
+    lines.append("")
+    lines.append(
+        "**Generated deterministically by `sentinelpay.eda.generate_report.render_phase_c_report` "
+        "from `reports/eda/phase_c_results.json`** -- every number below is read from that file; "
+        "re-running `python -m sentinelpay.eda.run_phase_c` regenerates both together."
+    )
+
+    lines.append(_PHASE_C_SCOPE_SECTION)
+
+    lines.append("## 1. Split configuration (unchanged from Phase B)\n")
+    lines.append("| partition | start_day | end_day |")
+    lines.append("|---|---|---|")
+    for name, rng in split_config.items():
+        lines.append(f"| {name} | {rng['start_day']} | {rng['end_day']} |")
+
+    lines.append("\n## 2. Holdout sealing\n")
+    lines.append(
+        f"- Total rows loaded (single `train_transaction.csv`, spans all partitions): "
+        f"**{results['n_rows_total']:,}**.\n"
+        f"- Rows filtered to `train`/`embargo_1`/`validation`/`embargo_2` "
+        f"(`sentinelpay.data.split.DEVELOPMENT_PARTITIONS`) **before** `build_feature_frame` is ever "
+        f"called: **{results['n_rows_development']:,}**.\n"
+        f"- Holdout rows excluded, never touched by feature computation: "
+        f"**{results['n_rows_holdout_excluded']:,}**.\n"
+        f"- `isFraud` is never loaded by `sentinelpay.eda.run_phase_c` -- only `TransactionID`, "
+        f"`TransactionDT`, `TransactionAmt` are read from `train_transaction.csv`."
+    )
+
+    lines.append("\n## 3. Feature registry\n")
+    lines.append(
+        _table(
+            [
+                {
+                    "feature": e["feature"],
+                    "source_columns": ", ".join(e["source_columns"]),
+                    "uses_target": e["uses_target"],
+                    "temporal_dependency": e["temporal_dependency"],
+                    "description": e["description"],
+                }
+                for e in registry
+            ]
+        )
+    )
+
+    lines.append("\n## 4. Feature summary by partition (train/embargo_1/validation/embargo_2 only)\n")
+    lines.append(_table(summary))
+
+    lines.append(_PHASE_C_HISTORY_SECTION)
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def render_phase_b_report(results: dict, report_path: Path) -> None:
     split_config = results["split_config"]
     validation_result = results["validation_result"]
