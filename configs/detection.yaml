@@ -1,0 +1,49 @@
+# Fixed, pre-declared detector hyperparameters for the Phase D per-entity
+# behavioral-change detector (sentinelpay.detection). Every fixed detector
+# parameter lives here -- none is hard-coded in sentinelpay/detection.py.
+#
+# None of these values may be selected, tuned, swept, or changed based on
+# validation isFraud results, in Phase D or as a follow-up inside the same
+# proposal. Any future re-tuning is a separate, separately-approved proposal.
+# See the approved Phase D proposal (reports/eda/phase_d_report.md once
+# generated) for full justification of each value below.
+
+# Minimum number of strictly-prior same-payment_proxy_key events required
+# before a score is computed at all (below this: cold start, score = NaN,
+# flag = "insufficient_history"). Reuses Phase D.1's own pre-declared
+# DECISION_THRESHOLD (sentinelpay.eda.grouping_key_sufficiency) -- the
+# "enough causal history" bar already measured as partition-stable and
+# dominant-group-robust for payment_proxy_key specifically. D.1 never read
+# isFraud, so this number was not fit to labels.
+min_history_for_score: 5
+
+# Event-count window: the median/MAD used for scoring are computed over at
+# most this many of the most recent strictly-prior same-key events (see
+# sentinelpay.data.history.prior_group_windowed_robust_stats for the exact
+# whole-bucket-at-the-boundary rule). Reuses Phase D.1's largest pre-declared
+# threshold bucket (>= 20 prior events), already measured for
+# payment_proxy_key: 58.98% overall sufficiency, 55.36-75.41% by partition,
+# 55.89% worst-case after excluding the top-10 dominant groups -- i.e. a
+# size at which a majority of in-scope rows already have that much history,
+# with demonstrated partition/dominant-group stability. An event-count
+# window (not a calendar/time window) is used because TransactionDT is a
+# seconds-offset from an undisclosed reference point, not a real timestamp
+# (Phase A) -- a calendar-day window would import the same
+# undocumented-lookback-semantics risk the 7-day embargo exists to hedge
+# against for the D-columns.
+window_size_events: 20
+
+# Standard Iglewicz & Hoaglin (1993) modified z-score consistency constant:
+#   modified_zscore = modified_zscore_scale_constant * (x - median) / MAD
+# A mathematical property of the statistic (0.6745 = 1 / 1.4826, the
+# normal-consistency scale factor for MAD), not tuned to this dataset.
+modified_zscore_scale_constant: 0.6745
+
+# Standard, widely cited Iglewicz & Hoaglin outlier cutoff for the modified
+# z-score: |modified_zscore| >= this value -> flag = "scored_outlier".
+modified_zscore_threshold: 3.5
+
+# Numerical-safety floor only: if the windowed prior MAD is <= this value
+# (prior amounts effectively identical), score = NaN, flag = "zero_mad"
+# rather than dividing by (near) zero. Not a detection-sensitivity knob.
+zero_mad_epsilon: 1.0e-9

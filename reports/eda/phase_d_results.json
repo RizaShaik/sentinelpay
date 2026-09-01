@@ -1,0 +1,161 @@
+{
+  "split_config": {
+    "train": {
+      "start_day": 1,
+      "end_day": 130
+    },
+    "embargo_1": {
+      "start_day": 131,
+      "end_day": 137
+    },
+    "validation": {
+      "start_day": 138,
+      "end_day": 160
+    },
+    "embargo_2": {
+      "start_day": 161,
+      "end_day": 167
+    },
+    "holdout": {
+      "start_day": 168,
+      "end_day": 182
+    }
+  },
+  "detection_config": {
+    "min_history_for_score": 5,
+    "window_size_events": 20,
+    "modified_zscore_scale_constant": 0.6745,
+    "modified_zscore_threshold": 3.5,
+    "zero_mad_epsilon": 1e-09
+  },
+  "n_rows_total": 590540,
+  "n_rows_development": 549899,
+  "n_rows_holdout_excluded": 40641,
+  "n_rows_missing_payment_proxy_key": 71197,
+  "n_rows_valid_key": 478702,
+  "coverage_by_partition": [
+    {
+      "partition": "train",
+      "n_rows": 386407,
+      "pct_insufficient_history": 23.94,
+      "pct_zero_mad": 1.5556,
+      "pct_scored_normal": 70.6918,
+      "pct_scored_outlier": 3.8126
+    },
+    {
+      "partition": "embargo_1",
+      "n_rows": 16386,
+      "pct_insufficient_history": 11.0155,
+      "pct_zero_mad": 1.8186,
+      "pct_scored_normal": 83.1991,
+      "pct_scored_outlier": 3.9668
+    },
+    {
+      "partition": "validation",
+      "n_rows": 57806,
+      "pct_insufficient_history": 10.2982,
+      "pct_zero_mad": 1.8199,
+      "pct_scored_normal": 83.6678,
+      "pct_scored_outlier": 4.2141
+    },
+    {
+      "partition": "embargo_2",
+      "n_rows": 18103,
+      "pct_insufficient_history": 10.5397,
+      "pct_zero_mad": 3.8281,
+      "pct_scored_normal": 81.3235,
+      "pct_scored_outlier": 4.3087
+    }
+  ],
+  "score_distribution": {
+    "n_scored_rows": 368476,
+    "abs_modified_zscore_p50": 0.7462477521764413,
+    "abs_modified_zscore_p75": 1.4132114021788384,
+    "abs_modified_zscore_p90": 2.451011234081631,
+    "abs_modified_zscore_p99": 8.456068762782204
+  },
+  "validation_evaluation": {
+    "coverage": {
+      "n_validation_rows": 57806,
+      "flag_counts": {
+        "insufficient_history": 5953,
+        "zero_mad": 1052,
+        "scored_normal": 48365,
+        "scored_outlier": 2436
+      },
+      "flag_pct": {
+        "insufficient_history": 10.2982,
+        "zero_mad": 1.8199,
+        "scored_normal": 83.6678,
+        "scored_outlier": 4.2141
+      }
+    },
+    "n_scored_rows": 50801,
+    "fraud_rate_by_score_decile": [
+      {
+        "score_decile": "(-1501.826, -1.385]",
+        "n_rows": 5081,
+        "fraud_rate": 0.014564062192481795
+      },
+      {
+        "score_decile": "(-1.385, -0.855]",
+        "n_rows": 5080,
+        "fraud_rate": 0.01751968503937008
+      },
+      {
+        "score_decile": "(-0.855, -0.579]",
+        "n_rows": 5080,
+        "fraud_rate": 0.01889763779527559
+      },
+      {
+        "score_decile": "(-0.579, -0.248]",
+        "n_rows": 5080,
+        "fraud_rate": 0.01988188976377953
+      },
+      {
+        "score_decile": "(-0.248, 0.0]",
+        "n_rows": 6175,
+        "fraud_rate": 0.021538461538461538
+      },
+      {
+        "score_decile": "(0.0, 0.245]",
+        "n_rows": 3985,
+        "fraud_rate": 0.020326223337515683
+      },
+      {
+        "score_decile": "(0.245, 0.647]",
+        "n_rows": 5080,
+        "fraud_rate": 0.024803149606299212
+      },
+      {
+        "score_decile": "(0.647, 1.063]",
+        "n_rows": 5080,
+        "fraud_rate": 0.02578740157480315
+      },
+      {
+        "score_decile": "(1.063, 1.934]",
+        "n_rows": 5080,
+        "fraud_rate": 0.025590551181102362
+      },
+      {
+        "score_decile": "(1.934, 464.237]",
+        "n_rows": 5080,
+        "fraud_rate": 0.026771653543307086
+      }
+    ],
+    "fraud_rate_outlier_vs_normal": [
+      {
+        "flag": "scored_outlier",
+        "n_rows": 2436,
+        "fraud_rate": 0.02504105090311987
+      },
+      {
+        "flag": "scored_normal",
+        "n_rows": 48365,
+        "fraud_rate": 0.021420448671560014
+      }
+    ],
+    "roc_auc_abs_modified_zscore_vs_isFraud": 0.4992388485870996,
+    "roc_auc_n_rows": 50801
+  }
+}

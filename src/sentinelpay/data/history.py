@@ -37,6 +37,7 @@ functions by Phase C (see sentinelpay.eda.run_phase_c).
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 
@@ -95,6 +96,129 @@ def prior_group_amount_stats(
     )
     merged.index = df.index
     return merged[["prior_sum", "prior_count", "prior_mean"]]
+
+
+def prior_group_windowed_robust_stats(
+    df: pd.DataFrame,
+    group_col: str,
+    amount_col: str,
+    dt_col: str,
+    window_size_events: int,
+) -> pd.DataFrame:
+    """Median/MAD of `amount_col` over an event-count window of the most
+    recent strictly-prior same-`group_col` rows, aligned to `df.index`.
+
+    Returns columns `prior_median`, `prior_mad`, `prior_count_in_window`.
+    This function has no target dependency (never accepts or reads
+    `isFraud`) and no threshold/cold-start concept of its own -- it always
+    reports whatever real prior median/MAD/count exist (including
+    `prior_count_in_window == 0` -> `NaN` median/MAD when there is no
+    strictly-earlier same-group row at all). Deciding what counts as "enough"
+    history is a caller concern (see `sentinelpay.detection`).
+
+    Causal contract (mirrors `prior_group_count`/`prior_group_amount_stats`,
+    extended for windowing):
+    - Strictly-earlier only: for row i, only same-group rows with `dt_col`
+      strictly less than row i's `dt_col` are ever eligible.
+    - Ties never see each other: two rows sharing `(group_col, dt_col)` are
+      never in each other's eligible set -- rows are first collapsed into
+      `(group_col, dt_col)` buckets, and only whole buckets are ever
+      considered.
+    - Window boundary + ties: eligible buckets (strictly before row i,
+      sorted by `dt_col` within group) are accumulated from most-recent to
+      least-recent until their combined row count is >= `window_size_events`;
+      the bucket that crosses the threshold is included WHOLE, never split.
+      So the realized window size is `window_size_events` rows or slightly
+      more when the boundary bucket ties multiple rows together at one
+      `dt_col` value -- never fewer (except when total prior history itself
+      is smaller than `window_size_events`, in which case all of it is
+      used). This rule is defined purely by `(group, dt)` bucket values, so
+      it can never depend on row order or on which specific tied row is
+      "row i."
+    - Row-order independence: implemented via a groupby/sort over
+      `(group_col, dt_col)` values only, never row position or any
+      identifier column -- shuffling the input rows does not change any
+      row's result.
+    - Future perturbations: row i's window is built only from buckets with
+      `dt_col` strictly less than row i's -- mutating or appending a row at
+      or after row i's `dt_col` can only change buckets at or after row i,
+      never row i's own window, median, or MAD.
+
+    Implementation note: median/MAD cannot be decomposed into a cumulative
+    sum the way `prior_group_amount_stats` computes prior sum/count/mean, so
+    this function walks each group's buckets once with a two-pointer sliding
+    window (the minimal-window start index is provably non-decreasing as the
+    right edge advances), amortized O(bucket count) per group plus the cost
+    of re-concatenating each window's values.
+    """
+    for col in (group_col, amount_col, dt_col):
+        if col not in df.columns:
+            raise ValueError(f"prior_group_windowed_robust_stats requires column '{col}'")
+    if window_size_events <= 0:
+        raise ValueError("window_size_events must be a positive integer")
+
+    bucket = (
+        df.groupby([group_col, dt_col], observed=True)[amount_col]
+        .apply(lambda s: np.sort(s.to_numpy(dtype="float64")))
+        .rename("_bucket_values")
+        .reset_index()
+    )
+    bucket["_bucket_count"] = bucket["_bucket_values"].apply(len).astype("int64")
+    # groupby-then-reset_index commonly promotes an integer index level to
+    # int64 regardless of the source column's dtype (e.g. a downcast int32
+    # TransactionDT) -- realign before the final merge so pandas' key
+    # factorizer never sees a dtype mismatch between df[dt_col] and
+    # bucket[dt_col].
+    bucket[dt_col] = bucket[dt_col].astype(df[dt_col].dtype)
+    bucket = bucket.sort_values([group_col, dt_col], ignore_index=True)
+
+    n_buckets = len(bucket)
+    prior_median = np.full(n_buckets, np.nan)
+    prior_mad = np.full(n_buckets, np.nan)
+    prior_count_in_window = np.zeros(n_buckets, dtype="int64")
+
+    for _, sub in bucket.groupby(group_col, observed=True, sort=False):
+        idx = sub.index.to_numpy()
+        counts = sub["_bucket_count"].to_numpy()
+        values = sub["_bucket_values"].to_numpy()
+        n = len(idx)
+        lo = 0
+        running_sum = 0
+        for i in range(n):
+            # Shrink from the left while still satisfying the threshold --
+            # the minimal (most-recent) window achieving >= window_size_events.
+            while lo < i and (running_sum - counts[lo]) >= window_size_events:
+                running_sum -= counts[lo]
+                lo += 1
+            pos = idx[i]
+            prior_count_in_window[pos] = running_sum
+            if running_sum > 0:
+                arr = values[lo] if i - lo == 1 else np.concatenate(list(values[lo:i]))
+                med = np.median(arr)
+                prior_median[pos] = med
+                prior_mad[pos] = np.median(np.abs(arr - med))
+            running_sum += counts[i]
+
+    bucket["prior_median"] = prior_median
+    bucket["prior_mad"] = prior_mad
+    bucket["prior_count_in_window"] = prior_count_in_window
+
+    # pandas' merge key factorizer hard-requires int64 buffers; on Windows
+    # numpy's platform-default integer dtype is 32-bit, so even two columns
+    # that report the "same" dtype (e.g. both int32) can trigger a Cython
+    # buffer-dtype mismatch. Force both merge-key integer columns to int64
+    # explicitly, in copies, rather than relying on dtype-matching alone.
+    left_key = df[[group_col, dt_col]].copy()
+    left_key[dt_col] = left_key[dt_col].astype("int64")
+    left_key["_pos"] = np.arange(len(df))
+
+    right_key = bucket[[group_col, dt_col, "prior_median", "prior_mad", "prior_count_in_window"]].copy()
+    right_key[dt_col] = right_key[dt_col].astype("int64")
+
+    merged = left_key.merge(right_key, on=[group_col, dt_col], how="left").sort_values("_pos", ignore_index=True)
+    result = merged[["prior_median", "prior_mad", "prior_count_in_window"]]
+    result.index = df.index
+    return result
 
 
 def time_since_last_group_event(df: pd.DataFrame, group_col: str, dt_col: str) -> pd.Series:

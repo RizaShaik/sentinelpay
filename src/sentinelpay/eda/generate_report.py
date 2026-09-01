@@ -699,3 +699,175 @@ def render_phase_b_report(results: dict, report_path: Path) -> None:
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+_PHASE_D_SCOPE_SECTION = """
+## Scope (what Phase D is, and deliberately is not)
+
+Phase D is the first real per-`payment_proxy_key` behavioral-change
+detector, built on D.1's evidence-based grouping-key recommendation. Explicit
+hard non-target boundary, enforced by tests, not just convention:
+
+- **`sentinelpay.data.history` and `sentinelpay.detection` never import,
+  accept, or reference `isFraud` (or any target column)** in any function
+  signature or computation. Every score, flag, cold-start decision, and
+  zero-MAD decision is computed strictly from `TransactionID`,
+  `TransactionDT`, `TransactionAmt`, and `payment_proxy_key` columns.
+- **`isFraud` is read in exactly one place**: the validation-only evaluation
+  section below, which runs strictly AFTER every score/flag already exists,
+  reads `isFraud` only for `validation`-partition rows, and never writes
+  anything back into a score, a flag, or `configs/detection.yaml`.
+- **No hyperparameter is selected, tuned, or changed based on validation
+  `isFraud` results** -- every value in the hyperparameter table below was
+  fixed before this evaluation ran (see `configs/detection.yaml`).
+- **`device_proxy_key` is not used** -- D.1 found it unsuitable (row
+  coverage 20.30% < the 50% bar).
+- **No EWMA, CUSUM/change-point, or Isolation Forest** -- median/MAD
+  (Iglewicz & Hoaglin modified z-score) is the sole method this phase.
+- **No target encoding, no historical-fraud-rate feature, no coordinated-ring
+  detection (Phase E), no `data/processed/*.parquet` persistence.**
+- **`configs/split.yaml` boundaries and embargo widths are unchanged.**
+"""
+
+_PHASE_D_EMBARGO_SECTION = """
+## Embargo semantics: continuous history, no partition-boundary reset
+
+The detector's inputs are non-target aggregates (median/MAD of `amt_log1p`,
+event counts), so history is computed once over the full concatenated
+`train`+`embargo_1`+`validation`+`embargo_2` frame, sorted causally by
+`TransactionDT` -- partition labels are never used to gate, reset, or segment
+the history computation itself, only to group this report and the
+validation-only evaluation. `embargo_1` rows legitimately contribute to
+`validation` rows' windows, exactly as Phase C established for non-target
+historical aggregates (see reports/eda/phase_c_report.md). Holdout rows
+remain excluded before any content computation -- see Holdout sealing below.
+"""
+
+
+def _flag_table(rows: list[dict], flags: list[str]) -> str:
+    cols = ["partition", "n_rows"] + [f"pct_{f}" for f in flags]
+    return _table(rows, columns=cols)
+
+
+def render_phase_d_report(results: dict, report_path: Path) -> None:
+    split_config = results["split_config"]
+    dc = results["detection_config"]
+    evaluation = results["validation_evaluation"]
+    coverage = evaluation["coverage"]
+
+    flags = ["insufficient_history", "zero_mad", "scored_normal", "scored_outlier"]
+
+    lines: list[str] = []
+    lines.append("# SentinelPay -- Phase D Behavioral-Change Detector Report")
+    lines.append("")
+    lines.append(
+        "**Generated deterministically by `sentinelpay.eda.generate_report.render_phase_d_report` "
+        "from `reports/eda/phase_d_results.json`** -- every number below is read from that file; "
+        "re-running `python -m sentinelpay.eda.run_phase_d` regenerates both together."
+    )
+
+    lines.append(_PHASE_D_SCOPE_SECTION)
+
+    lines.append("## 1. Split configuration (unchanged from Phase B/C/D.1)\n")
+    lines.append("| partition | start_day | end_day |")
+    lines.append("|---|---|---|")
+    for name in ["train", "embargo_1", "validation", "embargo_2", "holdout"]:
+        rng = split_config[name]
+        lines.append(f"| {name} | {rng['start_day']} | {rng['end_day']} |")
+
+    lines.append("\n## 2. Detector hyperparameters (fixed before any evaluation)\n")
+    lines.append(
+        "All five values are loaded from `configs/detection.yaml`, never selected, tuned, or changed "
+        "based on validation `isFraud` results.\n"
+    )
+    lines.append("| parameter | value | justification |")
+    lines.append("|---|---|---|")
+    lines.append(
+        f"| `min_history_for_score` | {dc['min_history_for_score']} | Reuses D.1's `DECISION_THRESHOLD` "
+        "-- the pre-declared, already-validated (partition-stable, dominant-group-robust) \"enough causal "
+        "history\" bar for `payment_proxy_key`. |"
+    )
+    lines.append(
+        f"| `window_size_events` | {dc['window_size_events']} | Reuses D.1's largest pre-declared "
+        "threshold bucket (>= 20), already measured as majority-stable for `payment_proxy_key` across "
+        "partitions and dominant-group exclusion. |"
+    )
+    lines.append(
+        f"| `modified_zscore_scale_constant` | {dc['modified_zscore_scale_constant']} | Standard "
+        "Iglewicz & Hoaglin (1993) modified z-score consistency constant -- a mathematical property of "
+        "the statistic, not tuned to this dataset. |"
+    )
+    lines.append(
+        f"| `modified_zscore_threshold` | {dc['modified_zscore_threshold']} | Standard, widely cited "
+        "Iglewicz & Hoaglin outlier cutoff for the modified z-score. |"
+    )
+    lines.append(
+        f"| `zero_mad_epsilon` | {dc['zero_mad_epsilon']} | Numerical-safety floor only (avoids division "
+        "blow-up when prior amounts are near-identical), not a detection-sensitivity knob. |"
+    )
+
+    lines.append("\n## 3. Holdout sealing\n")
+    lines.append(
+        f"- Total rows loaded (`train_transaction.csv`): **{results['n_rows_total']:,}**.\n"
+        f"- Rows filtered to `train`/`embargo_1`/`validation`/`embargo_2` "
+        f"(`sentinelpay.data.split.DEVELOPMENT_PARTITIONS`) **before** `build_group_key`/"
+        f"`compute_behavioral_change_score` are ever called: **{results['n_rows_development']:,}**.\n"
+        f"- Holdout rows excluded, never touched by group-key, history, or score computation: "
+        f"**{results['n_rows_holdout_excluded']:,}**.\n"
+        f"- Of the development rows, **{results['n_rows_valid_key']:,}** have a valid `payment_proxy_key` "
+        f"({results['n_rows_missing_payment_proxy_key']:,} excluded, missing a key component).\n"
+        f"- `isFraud` is never read while building the detector; it is read only in section 5 below, "
+        f"only for `validation`-partition rows."
+    )
+
+    lines.append(_PHASE_D_EMBARGO_SECTION)
+
+    lines.append("## 4. Score coverage by partition (non-target)\n")
+    lines.append(_flag_table(results["coverage_by_partition"], flags))
+
+    dist = results.get("score_distribution", {})
+    if dist:
+        lines.append("\n**`abs(modified_zscore)` distribution among scored rows (all development partitions):**\n")
+        lines.append(
+            _table(
+                [dist],
+                columns=[
+                    "n_scored_rows",
+                    "abs_modified_zscore_p50",
+                    "abs_modified_zscore_p75",
+                    "abs_modified_zscore_p90",
+                    "abs_modified_zscore_p99",
+                ],
+            )
+        )
+
+    lines.append(
+        "\n## 5. `validation`-only target-association evaluation (diagnostic only -- NOT a feature, "
+        "NOT used to select any hyperparameter)\n"
+    )
+    lines.append(
+        f"- `validation` rows: **{coverage['n_validation_rows']:,}**. Flag breakdown: "
+        + ", ".join(f"`{f}` {coverage['flag_pct'].get(f, float('nan')):.2f}%" for f in flags)
+        + "."
+    )
+    lines.append(f"- Scored rows (non-`NaN` score) used for the metrics below: **{results['validation_evaluation']['n_scored_rows']:,}**.")
+
+    lines.append("\n**Fraud rate by `modified_zscore` decile (scored `validation` rows only):**\n")
+    lines.append(_table(evaluation.get("fraud_rate_by_score_decile", [])))
+
+    lines.append("\n**Fraud rate: `scored_outlier` vs. `scored_normal` (scored `validation` rows only):**\n")
+    lines.append(_table(evaluation.get("fraud_rate_outlier_vs_normal", [])))
+
+    auc = evaluation.get("roc_auc_abs_modified_zscore_vs_isFraud", float("nan"))
+    lines.append(
+        f"\n**ROC-AUC of `abs(modified_zscore)` vs. `isFraud`** (scored `validation` rows only, "
+        f"n={evaluation.get('roc_auc_n_rows', 0):,}): **{auc:.4f}**."
+    )
+    lines.append(
+        "\nThese four diagnostics are reported once, for the fixed configuration in section 2 above. "
+        "No threshold, window size, or constant is reselected from these results, and no sensitivity/sweep "
+        "table against `isFraud` is produced in this phase."
+    )
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
