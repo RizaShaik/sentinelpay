@@ -447,6 +447,151 @@ def render_phase_c_report(results: dict, report_path: Path) -> None:
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+_PHASE_D1_SCOPE_SECTION = """
+## Scope (what Phase D.1 is, and deliberately is not)
+
+Phase D.1 is a narrow, non-target grouping-key sufficiency analysis. Its
+only question: does `payment_proxy_key` or `device_proxy_key` have enough
+strictly-causal historical density to support a future Phase D per-entity
+behavioral-change detector? Explicitly out of scope, per the approved D.1
+proposal:
+
+- **No target of any kind.** `isFraud` is never loaded, never read, never
+  compared to either key. Nothing below is a fraud rate.
+- **No detector.** No rolling median/MAD, EWMA, or CUSUM/change-point
+  logic. No `configs/detection.yaml`, no `detection.py`.
+- **No target encoding, no fraud-rate evaluation, no score/parquet
+  persistence.**
+- **No production grouping-key selection made in advance.** The
+  recommendation below is a pure function of the measured results in this
+  report (see `sentinelpay.eda.grouping_key_sufficiency.recommend_grouping_key`)
+  -- not a preference decided before this analysis ran.
+- **`configs/split.yaml` boundaries are unchanged.**
+"""
+
+_PHASE_D1_METHOD_SECTION = """
+## Method
+
+For each candidate key, rows missing any key component are excluded (not
+imputed) before grouping. For every remaining row, the number of
+strictly-prior same-key events is counted by
+`sentinelpay.data.history.prior_group_count` (delegated, not
+re-implemented here): a row never counts itself, two rows sharing a
+timestamp never count each other, a future row can never change an
+earlier row's count, and results do not depend on input row order -- see
+`tests/test_history.py` for the causal-correctness evidence, and
+`tests/test_grouping_key_sufficiency.py` for this module's own tests
+against that guarantee.
+
+"Sufficiency at threshold T" is the percentage of valid rows with >= T
+strictly-prior same-key events. Five thresholds are reported (1/3/5/10/20)
+rather than one chosen in advance, both overall and broken out by
+`train`/`embargo_1`/`validation`/`embargo_2`, so concentration in `train`
+alone would be visible rather than hidden behind a single overall number.
+"""
+
+
+def _key_section(title: str, key_result: dict, key_eval: dict) -> list[str]:
+    lines: list[str] = []
+    lines.append(f"\n## {title}\n")
+    lines.append(
+        f"- Key columns: `{', '.join(key_result['key_columns'])}`.\n"
+        f"- Row coverage: **{key_result['n_rows_valid']:,}** / {key_result['n_rows_development']:,} "
+        f"development rows have the key (**{key_result['pct_rows_valid']:.2f}%**).\n"
+        f"- Distinct groups: **{key_result['n_groups']:,}**, of which "
+        f"**{key_result['n_singleton_groups']:,}** are singletons "
+        f"(**{key_result['singleton_fraction_of_valid_rows']:.2f}%** of valid rows).\n"
+        f"- Largest group: **{key_result['max_group_size']:,}** rows; median group size "
+        f"**{key_result['median_group_size']:.1f}**."
+    )
+
+    lines.append("\n**Strictly-prior event count distribution:**\n")
+    dist = key_result["prior_count_distribution"]
+    if dist:
+        lines.append(_table([dist], columns=["min", "p25", "p50", "p75", "p90", "p99", "max", "mean"]))
+
+    lines.append("\n**Group-size distribution:**\n")
+    lines.append(_table(key_result["group_size_distribution"], columns=["group_size", "n_groups", "n_rows_covered"]))
+
+    lines.append("\n**Sufficiency by threshold, overall:**\n")
+    overall = key_result["sufficiency_overall"]
+    lines.append(_table([{f">= {t}": pct for t, pct in overall.items()}]))
+
+    lines.append("\n**Sufficiency by threshold, by partition:**\n")
+    lines.append(_table(key_result["sufficiency_by_partition"]))
+
+    lines.append(
+        "\n**Dominant-group exclusion sensitivity** (remaining valid rows/coverage and recomputed "
+        "sufficiency after excluding the top-K largest groups):\n"
+    )
+    lines.append(_table(key_result["dominant_group_exclusion_sensitivity"]))
+
+    lines.append(
+        f"\n**This phase's evaluation** (threshold={key_eval['threshold']}): row coverage "
+        f"**{key_eval['row_coverage_pct']:.2f}%** (row_coverage_ok: **{key_eval['row_coverage_ok']}**) | "
+        f"overall sufficiency **{key_eval['overall_sufficiency_pct']:.2f}%** "
+        f"(density_ok: **{key_eval['coverage_ok']}**) | "
+        f"partition_stability_ok: **{key_eval['partition_stability_ok']}** | "
+        f"dominant_group_robustness_ok: **{key_eval['dominant_group_robustness_ok']}** "
+        f"(worst case after exclusion: {key_eval['worst_case_sufficiency_pct_after_exclusion']:.2f}%) | "
+        f"**is_suitable: {key_eval['is_suitable']}**."
+    )
+    return lines
+
+
+def render_phase_d1_report(results: dict, report_path: Path) -> None:
+    split_config = results["split_config"]
+    recommendation = results["recommendation"]
+
+    lines: list[str] = []
+    lines.append("# SentinelPay -- Phase D.1 Grouping-Key Sufficiency Analysis Report")
+    lines.append("")
+    lines.append(
+        "**Generated deterministically by `sentinelpay.eda.generate_report.render_phase_d1_report` "
+        "from `reports/eda/phase_d1_results.json`** -- every number below is read from that file; "
+        "re-running `python -m sentinelpay.eda.run_phase_d1` regenerates both together."
+    )
+
+    lines.append(_PHASE_D1_SCOPE_SECTION)
+
+    lines.append("## 1. Split configuration (unchanged from Phase B/C)\n")
+    lines.append("| partition | start_day | end_day |")
+    lines.append("|---|---|---|")
+    for name in ["train", "embargo_1", "validation", "embargo_2", "holdout"]:
+        rng = split_config[name]
+        lines.append(f"| {name} | {rng['start_day']} | {rng['end_day']} |")
+
+    lines.append("\n## 2. Holdout sealing\n")
+    lines.append(
+        f"- Total rows loaded (train_transaction.csv joined to train_identity.csv): "
+        f"**{results['n_rows_total']:,}**.\n"
+        f"- Rows filtered to `train`/`embargo_1`/`validation`/`embargo_2` "
+        f"(`sentinelpay.data.split.DEVELOPMENT_PARTITIONS`) **before** any grouping-key content "
+        f"analysis: **{results['n_rows_development']:,}**.\n"
+        f"- Holdout rows excluded, never touched by group-size/history/event-frequency computation: "
+        f"**{results['n_rows_holdout_excluded']:,}**.\n"
+        f"- `isFraud` is never loaded by `sentinelpay.eda.run_phase_d1`."
+    )
+
+    lines.append(_PHASE_D1_METHOD_SECTION)
+
+    lines.extend(_key_section("3. payment_proxy_key", results["payment_proxy_key"], results["payment_proxy_key_evaluation"]))
+    lines.extend(_key_section("4. device_proxy_key", results["device_proxy_key"], results["device_proxy_key_evaluation"]))
+
+    lines.append("\n## 5. Recommendation\n")
+    lines.append(
+        f"**{recommendation['recommendation']}**\n\n{recommendation['reason']}\n\n"
+        "This is the output of `sentinelpay.eda.grouping_key_sufficiency.recommend_grouping_key` "
+        "applied to the measured results above -- a pure function of this run's numbers, not a "
+        "preference chosen before D.1 ran. It is a recommendation for a Phase D scoping decision, "
+        "not an implementation: no detector, target encoding, or persistence exists yet regardless "
+        "of which key this section names."
+    )
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def render_phase_b_report(results: dict, report_path: Path) -> None:
     split_config = results["split_config"]
     validation_result = results["validation_result"]
