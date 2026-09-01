@@ -5,9 +5,10 @@ Hard non-target boundary: this module never imports, accepts, or reads
 `isFraud` (or any target column) in any function signature or computation.
 Every score, flag, cold-start decision, and zero-MAD decision below is
 computed strictly from `sentinelpay.data.history.prior_group_windowed_robust_stats`
-(median/MAD over `amt_log1p`, itself computed by
-`sentinelpay.features.add_amt_log1p` -- row-local, non-target) and the fixed
-hyperparameters in `sentinelpay.config.DetectionConfig`/`configs/detection.yaml`.
+(median/MAD over `amt_log1p`, computed inline as `np.log1p(amount_col)` --
+row-local, non-target, the same formula as `sentinelpay.features.add_amt_log1p`)
+and the fixed hyperparameters in
+`sentinelpay.config.DetectionConfig`/`configs/detection.yaml`.
 `isFraud` is read in exactly one place in this project:
 `sentinelpay.eda.run_phase_d`'s validation-only evaluation step, which runs
 strictly after every score/flag here is already final and never writes
@@ -39,7 +40,6 @@ import pandas as pd
 
 from sentinelpay.config import DetectionConfig
 from sentinelpay.data.history import prior_group_windowed_robust_stats
-from sentinelpay.features import add_amt_log1p
 
 FLAG_INSUFFICIENT_HISTORY = "insufficient_history"
 FLAG_ZERO_MAD = "zero_mad"
@@ -81,7 +81,7 @@ def compute_behavioral_change_score(
         if col not in df.columns:
             raise ValueError(f"compute_behavioral_change_score requires column '{col}'")
 
-    amt_log1p = add_amt_log1p(df, amount_col=amount_col)["amt_log1p"]
+    amt_log1p = np.log1p(df[amount_col])
 
     working = df[[group_col, dt_col]].copy()
     working["amt_log1p"] = amt_log1p
