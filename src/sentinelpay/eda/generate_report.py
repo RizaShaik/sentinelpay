@@ -1260,6 +1260,110 @@ def render_phase_f_report(results: dict, report_path: Path) -> None:
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+_PHASE_G_SCOPE_SECTION = """
+## Scope (what Phase G is, and deliberately is not)
+
+Phase G is a development-only model integration and ablation pass over the
+B0-F2 baseline ladder, headline comparison B2 vs. F2. Phase F is consumed
+FROZEN and VERBATIM -- no re-tuning of `SMOOTHING_K`, no redefinition of
+smoothing, no new target-history logic (`sentinelpay.target_history` and
+`sentinelpay.eda.run_phase_f` are both untouched). Phase C and Phase D are
+likewise consumed unmodified. Explicitly out of scope:
+
+- **No feature-matrix persistence.** `data/processed/*.parquet` is NOT
+  written -- matrices are built in memory, once per run.
+- **No hyperparameter tuning.** Logistic Regression only, library defaults
+  (`LOGREG_MAX_ITER` is a solver-convergence budget, not a modeling
+  choice); no tree/boosting model in this pass.
+- **No new phase started.** This is a one-time development-only evaluation.
+- **Holdout completely untouched** -- never loaded from disk by this
+  script.
+
+See `sentinelpay.model_features`'s module docstring for the full, explicit
+per-row leakage contract (including the intentional Phase D vs. Phase F
+embargo-eligibility asymmetry) every feature block below satisfies.
+"""
+
+
+def render_phase_g_report(results: dict, report_path: Path) -> None:
+    split_config = results["split_config"]
+    ladder_cols = results["ladder_feature_columns"]
+    ladder = results["ladder_results"]
+    grad = results["graduation"]
+
+    lines: list[str] = []
+    lines.append("# SentinelPay -- Phase G Development-Only Model Integration & Ablation Report")
+    lines.append("")
+    lines.append(
+        "**Generated deterministically by `sentinelpay.eda.generate_report.render_phase_g_report` "
+        "from `reports/eda/phase_g_results.json`** -- every number below is read from that file; "
+        "re-running `python -m sentinelpay.eda.run_phase_g` regenerates both together."
+    )
+
+    lines.append(_PHASE_G_SCOPE_SECTION)
+
+    lines.append("## 1. Split configuration (unchanged from Phase B/C/D/D.1/E.1/E.2/F)\n")
+    lines.append("| partition | start_day | end_day |")
+    lines.append("|---|---|---|")
+    for name in ["train", "embargo_1", "validation", "embargo_2", "holdout"]:
+        rng = split_config[name]
+        lines.append(f"| {name} | {rng['start_day']} | {rng['end_day']} |")
+
+    lines.append("\n## 2. Holdout sealing\n")
+    lines.append(
+        f"- Total rows loaded (train_transaction.csv): **{results['n_rows_total']:,}**.\n"
+        f"- Rows filtered to development partitions **before** any key-building or feature assembly: "
+        f"**{results['n_rows_development']:,}**.\n"
+        f"- Holdout rows excluded, never touched: **{results['n_rows_holdout_excluded']:,}**.\n"
+        f"- `payment_proxy_key` present on **{results['n_rows_valid_key']:,}** development rows "
+        f"(**{results['n_rows_missing_payment_proxy_key']:,}** excluded).\n"
+        f"- Model rows: `train`=**{results['n_rows_train']:,}**, `validation`=**{results['n_rows_validation']:,}**."
+    )
+
+    lines.append("\n## 3. Fixed ladder feature schema (identical order for train and validation)\n")
+    for step in ["B1", "B2", "F1", "F2"]:
+        lines.append(f"- **{step}** ({len(ladder_cols[step])} features): `{ladder_cols[step]}`\n")
+
+    lines.append("\n## 4. Ladder results (validation-only)\n")
+    ladder_rows = [
+        {
+            "step": step,
+            "n_features": ladder["n_features"],
+            "converged": ladder.get("converged", ""),
+            "roc_auc": ladder["roc_auc"],
+            "pr_auc": ladder["pr_auc"],
+        }
+        for step, ladder in results["ladder_results"].items()
+    ]
+    lines.append(_table(ladder_rows, float_fmt="{:.6f}"))
+
+    lines.append("\n## 5. Graduation gates (fixed before this evaluation ran)\n")
+    boot = grad["bootstrap_pr_auc_delta_f2_minus_b2"]
+    lines.append(
+        f"- **Gate 1** -- relative PR-AUC lift, F2 >= B2 x {grad['relative_lift_threshold']}: "
+        f"**{grad['gate1_relative_pr_auc_lift_f2_over_b2']}** (actual lift: "
+        f"{grad['pr_auc_relative_lift_f2_over_b2']:.4f}x)\n"
+        f"- **Gate 2** -- ROC-AUC(F2) >= ROC-AUC(B2): **{grad['gate2_roc_auc_f2_ge_b2']}**\n"
+        f"- **Gate 3** -- bootstrap 95% CI lower bound of [PR-AUC(F2) - PR-AUC(B2)] > 0: "
+        f"**{grad['gate3_bootstrap_ci_lower_gt_zero']}** "
+        f"(mean_delta={boot['mean_delta']:.6f}, ci=[{boot['ci_lower']:.6f}, {boot['ci_upper']:.6f}], "
+        f"n_resamples_used={boot['n_resamples_used']}/{boot['n_resamples_requested']}, seed={boot['seed']})\n"
+        f"- **Gate 4** -- PR-AUC(F1) > PR-AUC(B2), deterministic: **{grad['gate4_pr_auc_f1_gt_b2']}**\n"
+        f"- Reported (not a gate): B2 <= F1 <= F2 monotonic in PR-AUC: **{grad['monotonic_b2_le_f1_le_f2_pr_auc']}**\n\n"
+        f"### ALL GATES PASS: **{grad['all_gates_pass']}**\n"
+    )
+
+    lines.append(
+        "\n## 6. No persistence, no new phase\n\n"
+        "No `data/processed/*.parquet` was written. No production feature, score, threshold, config, or "
+        "further phase is started by this script regardless of the result above -- this is a one-time "
+        "development-only evaluation.\n"
+    )
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def render_phase_b_report(results: dict, report_path: Path) -> None:
     split_config = results["split_config"]
     validation_result = results["validation_result"]
