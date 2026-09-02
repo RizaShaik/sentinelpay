@@ -15,6 +15,7 @@ templated from `results`.
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 
@@ -926,6 +927,190 @@ def render_phase_e1_report(results: dict, report_path: Path) -> None:
     lines.append("\n## 6. Not yet analyzed (measured columns available, deferred to a follow-up pass)\n")
     for item in results.get("not_yet_analyzed", []):
         lines.append(f"- {item}")
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+_PHASE_E2_SCOPE_SECTION = """
+## Scope (what Phase E.2 is, and deliberately is not)
+
+Phase E.2 is a minimal, non-target per-transaction Union-Find /
+connected-component MEASUREMENT pass for exactly one relationship:
+device_node <-> payment_node -- the only relationship whose Phase E.1
+M5b frequency-adjusted overlap diagnostic cleared `LIFT_SIGNAL_THRESHOLD`
+(lift_ratio 11.06x; see reports/eda/phase_e1_report.md section 5).
+Explicitly out of scope:
+
+- **No other relationship.** payment_email_purchaser and device_email_purchaser
+  both stayed below `LIFT_SIGNAL_THRESHOLD` in E.1 and are not built here.
+- **No scoring model, no flags, no `configs/detection.yaml`-style
+  persistence.** This is a measurement pass only.
+- **No target of any kind, except in exactly one place.** `isFraud` is never
+  loaded or read in `sentinelpay.eda.component_analysis` or
+  `sentinelpay.data.causal_components`, and every non-target quantity below
+  (all four component metrics, plus the fan-out stratification variable) is
+  fully computed before `isFraud` is read at all. The pre-declared
+  fan-out-stratified diagnostic evaluation (section 6) is the ONE
+  strictly-downstream, `validation`-partition-only place `isFraud` is read in
+  this phase -- mirrors Phase D's `evaluate_validation_only` precedent
+  exactly, and its fixed bin edges were declared from already-published
+  non-target percentiles BEFORE this evaluation ever read `isFraud` (see
+  section 6). This is a one-time EDA evaluation only: no production feature,
+  score, threshold, config, or E.3 work is added regardless of its result.
+- **No E.3 work of any kind.**
+
+**Per-transaction metrics, computed at read time strictly from Union-Find
+state built from earlier TransactionDT buckets only** (see
+`sentinelpay.data.causal_components` for the full causal contract, including
+why the actual Union-Find mutation for a bucket is deferred until every row
+in that bucket has already been read):
+
+- `device_component_size_total` -- size of the device_node's own component.
+- `payment_component_size_total` -- size of the payment_node's own component.
+- `endpoints_same_component` -- whether the two endpoints were already in
+  the same component.
+- `merged_component_size_total` -- the hypothetical size if this edge were
+  unioned right now: the shared size if `endpoints_same_component`, else the
+  sum of the two component sizes above. A current edge's two endpoints can
+  already belong to two DIFFERENT causal components -- this metric (and the
+  two component-size metrics it's built from) is why this phase reports
+  both endpoints' state rather than only the component containing one of
+  them.
+"""
+
+
+def render_phase_e2_report(results: dict, report_path: Path) -> None:
+    split_config = results["split_config"]
+    coverage = results["relationship_row_coverage"]
+    overall = results["component_metrics_summary_overall"]
+    by_partition = results["component_metrics_summary_by_partition"]
+
+    lines: list[str] = []
+    lines.append("# SentinelPay -- Phase E.2 Union-Find Component Metrics Report (Measurement Pass)")
+    lines.append("")
+    lines.append(
+        "**Generated deterministically by `sentinelpay.eda.generate_report.render_phase_e2_report` "
+        "from `reports/eda/phase_e2_results.json`** -- every number below is read from that file; "
+        "re-running `python -m sentinelpay.eda.run_phase_e2` regenerates both together."
+    )
+
+    lines.append(_PHASE_E2_SCOPE_SECTION)
+
+    lines.append("## 1. Split configuration (unchanged from Phase B/C/D/D.1/E.1)\n")
+    lines.append("| partition | start_day | end_day |")
+    lines.append("|---|---|---|")
+    for name in ["train", "embargo_1", "validation", "embargo_2", "holdout"]:
+        rng = split_config[name]
+        lines.append(f"| {name} | {rng['start_day']} | {rng['end_day']} |")
+
+    lines.append("\n## 2. Holdout sealing\n")
+    lines.append(
+        f"- Total rows loaded (train_transaction.csv joined to train_identity.csv): "
+        f"**{results['n_rows_total']:,}**.\n"
+        f"- Rows filtered to `train`/`embargo_1`/`validation`/`embargo_2` "
+        f"(`sentinelpay.data.split.DEVELOPMENT_PARTITIONS`) **before** any component computation: "
+        f"**{results['n_rows_development']:,}**.\n"
+        f"- Holdout rows excluded, never touched by relationship-frame or component computation: "
+        f"**{results['n_rows_holdout_excluded']:,}**.\n"
+        f"- `isFraud` is never loaded by `sentinelpay.eda.run_phase_e2`."
+    )
+
+    lines.append("\n## 3. device_node <-> payment_node relationship row coverage\n")
+    lines.append(
+        f"**{coverage['n_rows_valid']:,}** / {results['n_rows_development']:,} development rows "
+        f"(**{coverage['pct_rows_valid']:.2f}%**) have both `_device_node` and `_payment_node` present "
+        "-- identical row coverage to Phase E.1's payment_device relationship pair (both directions "
+        "share the same valid-row set)."
+    )
+
+    lines.append("\n## 4. Per-transaction component metrics -- overall descriptive summary\n")
+    lines.append(f"n_rows: **{overall['n_rows']:,}**\n")
+    for metric_name in ("device_component_size_total", "payment_component_size_total", "merged_component_size_total"):
+        lines.append(f"**{metric_name}:**\n")
+        lines.append(_table([overall[metric_name]]))
+    same = overall["endpoints_same_component"]
+    lines.append(
+        f"**endpoints_same_component:** n_true={same['n_true']:,} | n_false={same['n_false']:,} | "
+        f"pct_true={same['pct_true']:.4f}%\n"
+    )
+
+    lines.append("\n## 5. Per-transaction component metrics -- by partition\n")
+    for row in by_partition:
+        lines.append(f"### partition: {row['partition']} (n_rows={row['n_rows']:,})\n")
+        for metric_name in ("device_component_size_total", "payment_component_size_total", "merged_component_size_total"):
+            lines.append(f"**{metric_name}:**\n")
+            lines.append(_table([row[metric_name]]))
+        same = row["endpoints_same_component"]
+        lines.append(
+            f"**endpoints_same_component:** n_true={same['n_true']:,} | n_false={same['n_false']:,} | "
+            f"pct_true={same['pct_true']:.4f}%\n"
+        )
+
+    diag = results.get("fanout_stratified_diagnostic_evaluation")
+    if diag:
+        lines.append(
+            "\n## 6. Fan-out-stratified diagnostic evaluation (isFraud, validation-partition only)\n\n"
+            "The ONE place `isFraud` is read in this phase -- strictly downstream of every quantity "
+            "above, `validation`-partition rows only. Question: does `merged_component_size_total` / "
+            "`endpoints_same_component` carry fraud-rate signal BEYOND device_to_payment's own prior "
+            "fan-out (Phase E.1's M1 quantity), or is it just re-detecting fan-out/hub-domination "
+            "(the same confound E.1's M5-vs-M5b correction addressed for raw overlap)? This is a "
+            "one-time EDA evaluation only -- no production feature, score, threshold, config, or E.3 "
+            "work is added regardless of the result below.\n"
+        )
+        lines.append(
+            f"**Fixed bins, declared BEFORE `isFraud` was read** (not tuned to any fraud-rate outcome):\n\n"
+            f"- `fanout_stratum_edges` (device_to_payment unbounded prior-distinct-partner count; "
+            f"E.1's own published p25/p50/p75 for this direction): `{diag['fanout_stratum_edges']}` -> "
+            f"{diag['fanout_stratum_labels']}\n"
+            f"- `component_size_bin_edges` (`merged_component_size_total`; this run's own published "
+            f"overall p25/p50/p75/p90, section 4 above): `{diag['component_size_bin_edges']}` -> "
+            f"{diag['component_size_bin_labels']}\n"
+        )
+        lines.append(f"\n`n_validation_rows` (partition == \"validation\" only): **{diag['n_validation_rows']:,}**\n")
+
+        lines.append("\n### 6.1 Unstratified (reference only)\n")
+        u = diag["unstratified"]
+        lines.append(
+            f"n_rows={u['n_rows']:,} | fraud_rate={u['fraud_rate']:.6f} | "
+            f"roc_auc_merged_component_size_total_vs_isFraud="
+            f"{u['roc_auc_merged_component_size_total_vs_isFraud']:.4f}\n"
+        )
+        lines.append("**fraud rate by merged_component_size_total bucket:**\n")
+        lines.append(_table(u["merged_component_size_total_fraud_rate_by_bucket"], float_fmt="{:.6f}"))
+        lines.append("**fraud rate by endpoints_same_component:**\n")
+        lines.append(_table(u["endpoints_same_component_fraud_rate"], float_fmt="{:.6f}"))
+
+        lines.append("\n### 6.2 Per fan-out stratum\n")
+        for s in diag["fanout_strata"]:
+            auc = s["roc_auc_merged_component_size_total_vs_isFraud"]
+            auc_str = "undefined (single class or 0 rows)" if (isinstance(auc, float) and math.isnan(auc)) else f"{auc:.4f}"
+            lines.append(
+                f"\n**{s['stratum']}** -- n_rows={s['n_rows']:,} | fraud_rate="
+                f"{s['fraud_rate']:.6f} | roc_auc_merged_component_size_total_vs_isFraud={auc_str}\n"
+            )
+            lines.append("fraud rate by merged_component_size_total bucket:\n")
+            lines.append(_table(s["merged_component_size_total_fraud_rate_by_bucket"], float_fmt="{:.6f}"))
+            lines.append("fraud rate by endpoints_same_component:\n")
+            lines.append(_table(s["endpoints_same_component_fraud_rate"], float_fmt="{:.6f}"))
+
+        lines.append("\n### 6.3 Conclusion\n")
+        lines.append(diag["conclusion"] + "\n")
+    else:
+        lines.append(
+            "\n## 6. Not yet done\n\n"
+            "- The pre-declared fan-out-stratified diagnostic evaluation (target-reading, strictly "
+            "downstream of this measurement pass) has not been run yet.\n"
+            "- No production feature, scoring model, or E.3 work exists yet regardless of this report's "
+            "numbers.\n"
+        )
+
+    lines.append(
+        "\n## 7. No production feature, scoring model, or E.3 work\n\n"
+        "Nothing in this report is a production feature, score, threshold, `configs/detection.yaml`-"
+        "style config, or E.3 work -- this is a one-time EDA measurement + diagnostic evaluation only.\n"
+    )
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("\n".join(lines), encoding="utf-8")

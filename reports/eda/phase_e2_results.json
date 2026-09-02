@@ -1,0 +1,500 @@
+{
+  "split_config": {
+    "train": {
+      "start_day": 1,
+      "end_day": 130
+    },
+    "embargo_1": {
+      "start_day": 131,
+      "end_day": 137
+    },
+    "validation": {
+      "start_day": 138,
+      "end_day": 160
+    },
+    "embargo_2": {
+      "start_day": 161,
+      "end_day": 167
+    },
+    "holdout": {
+      "start_day": 168,
+      "end_day": 182
+    }
+  },
+  "n_rows_total": 590540,
+  "n_rows_development": 549899,
+  "n_rows_holdout_excluded": 40641,
+  "relationship_row_coverage": {
+    "n_rows_valid": 73305,
+    "n_rows_development": 549899,
+    "pct_rows_valid": 13.3306,
+    "by_partition": [
+      {
+        "partition": "train",
+        "n_valid_rows": 64130
+      },
+      {
+        "partition": "embargo_1",
+        "n_valid_rows": 1340
+      },
+      {
+        "partition": "validation",
+        "n_valid_rows": 5124
+      },
+      {
+        "partition": "embargo_2",
+        "n_valid_rows": 2711
+      }
+    ]
+  },
+  "component_metrics_summary_overall": {
+    "n_rows": 73305,
+    "device_component_size_total": {
+      "min": 1,
+      "p25": 7247.0,
+      "p50": 12107.0,
+      "p75": 15810.0,
+      "p90": 17900.0,
+      "p99": 18997.960000000006,
+      "max": 19090,
+      "mean": 11263.710701862083
+    },
+    "payment_component_size_total": {
+      "min": 1,
+      "p25": 52.0,
+      "p50": 10427.0,
+      "p75": 15298.0,
+      "p90": 17733.0,
+      "p99": 18988.0,
+      "max": 19090,
+      "mean": 9193.24171611759
+    },
+    "merged_component_size_total": {
+      "min": 2,
+      "p25": 7506.0,
+      "p50": 12241.0,
+      "p75": 15893.0,
+      "p90": 17925.0,
+      "p99": 18998.0,
+      "max": 19090,
+      "mean": 11446.35509173999
+    },
+    "endpoints_same_component": {
+      "n_true": 53999,
+      "n_false": 19306,
+      "pct_true": 73.6635
+    }
+  },
+  "component_metrics_summary_by_partition": [
+    {
+      "partition": "train",
+      "n_rows": 64130,
+      "device_component_size_total": {
+        "min": 1,
+        "p25": 6571.25,
+        "p50": 11126.0,
+        "p75": 14541.75,
+        "p90": 16418.1,
+        "p99": 17510.0,
+        "max": 17625,
+        "mean": 10305.996943708093
+      },
+      "payment_component_size_total": {
+        "min": 1,
+        "p25": 1.0,
+        "p50": 9269.0,
+        "p75": 13937.0,
+        "p90": 16221.0,
+        "p99": 17486.71,
+        "max": 17625,
+        "mean": 8251.923608295649
+      },
+      "merged_component_size_total": {
+        "min": 2,
+        "p25": 6807.0,
+        "p50": 11241.5,
+        "p75": 14602.0,
+        "p90": 16443.0,
+        "p99": 17512.0,
+        "max": 17625,
+        "mean": 10463.54377046624
+      },
+      "endpoints_same_component": {
+        "n_true": 46305,
+        "n_false": 17825,
+        "pct_true": 72.2049
+      }
+    },
+    {
+      "partition": "embargo_1",
+      "n_rows": 1340,
+      "device_component_size_total": {
+        "min": 1,
+        "p25": 17671.0,
+        "p50": 17736.5,
+        "p75": 17796.25,
+        "p90": 17825.0,
+        "p99": 17842.0,
+        "max": 17848,
+        "mean": 17339.098507462688
+      },
+      "payment_component_size_total": {
+        "min": 1,
+        "p25": 17643.0,
+        "p50": 17716.0,
+        "p75": 17791.0,
+        "p90": 17824.0,
+        "p99": 17842.0,
+        "max": 17848,
+        "mean": 15023.942537313433
+      },
+      "merged_component_size_total": {
+        "min": 2,
+        "p25": 17674.0,
+        "p50": 17737.0,
+        "p75": 17799.0,
+        "p90": 17825.0,
+        "p99": 17842.61,
+        "max": 17848,
+        "mean": 17657.40223880597
+      },
+      "endpoints_same_component": {
+        "n_true": 1112,
+        "n_false": 228,
+        "pct_true": 82.9851
+      }
+    },
+    {
+      "partition": "validation",
+      "n_rows": 5124,
+      "device_component_size_total": {
+        "min": 1,
+        "p25": 18043.75,
+        "p50": 18286.5,
+        "p75": 18480.25,
+        "p90": 18620.0,
+        "p99": 18705.0,
+        "max": 18715,
+        "mean": 17863.107338017173
+      },
+      "payment_component_size_total": {
+        "min": 1,
+        "p25": 17941.0,
+        "p50": 18224.0,
+        "p75": 18451.0,
+        "p90": 18604.0,
+        "p99": 18705.0,
+        "max": 18715,
+        "mean": 15470.865534738485
+      },
+      "merged_component_size_total": {
+        "min": 2,
+        "p25": 18061.0,
+        "p50": 18292.5,
+        "p75": 18487.0,
+        "p90": 18626.0,
+        "p99": 18705.77,
+        "max": 18715,
+        "mean": 18195.98731459797
+      },
+      "endpoints_same_component": {
+        "n_true": 4247,
+        "n_false": 877,
+        "pct_true": 82.8845
+      }
+    },
+    {
+      "partition": "embargo_2",
+      "n_rows": 2711,
+      "device_component_size_total": {
+        "min": 1,
+        "p25": 18821.0,
+        "p50": 18934.0,
+        "p75": 19001.0,
+        "p90": 19043.0,
+        "p99": 19086.0,
+        "max": 19090,
+        "mean": 18442.558096643304
+      },
+      "payment_component_size_total": {
+        "min": 1,
+        "p25": 18791.0,
+        "p50": 18914.0,
+        "p75": 18996.0,
+        "p90": 19042.0,
+        "p99": 19086.0,
+        "max": 19090,
+        "mean": 16713.362227960162
+      },
+      "merged_component_size_total": {
+        "min": 2,
+        "p25": 18828.0,
+        "p50": 18936.0,
+        "p75": 19002.0,
+        "p90": 19043.0,
+        "p99": 19086.0,
+        "max": 19090,
+        "mean": 18867.886388786425
+      },
+      "endpoints_same_component": {
+        "n_true": 2335,
+        "n_false": 376,
+        "pct_true": 86.1306
+      }
+    }
+  ],
+  "fanout_stratified_diagnostic_evaluation": {
+    "fanout_stratum_edges": [
+      274.0,
+      982.0,
+      2199.0
+    ],
+    "fanout_stratum_labels": [
+      "low_fanout_lt_p25",
+      "mid_fanout_p25_to_p50",
+      "mid_fanout_p50_to_p75",
+      "high_fanout_ge_p75"
+    ],
+    "component_size_bin_edges": [
+      7506.0,
+      12241.0,
+      15893.0,
+      17925.0
+    ],
+    "component_size_bin_labels": [
+      "merged_size_lt_p25",
+      "merged_size_p25_to_p50",
+      "merged_size_p50_to_p75",
+      "merged_size_p75_to_p90",
+      "merged_size_ge_p90"
+    ],
+    "n_validation_rows": 5124,
+    "unstratified": {
+      "n_rows": 5124,
+      "fraud_rate": 0.051717408274785326,
+      "merged_component_size_total_fraud_rate_by_bucket": [
+        {
+          "bucket": "merged_size_lt_p25",
+          "n_rows": 24,
+          "fraud_rate": 0.16666666666666666
+        },
+        {
+          "bucket": "merged_size_p25_to_p50",
+          "n_rows": 0,
+          "fraud_rate": NaN
+        },
+        {
+          "bucket": "merged_size_p50_to_p75",
+          "n_rows": 0,
+          "fraud_rate": NaN
+        },
+        {
+          "bucket": "merged_size_p75_to_p90",
+          "n_rows": 470,
+          "fraud_rate": 0.06170212765957447
+        },
+        {
+          "bucket": "merged_size_ge_p90",
+          "n_rows": 4630,
+          "fraud_rate": 0.05010799136069115
+        }
+      ],
+      "endpoints_same_component_fraud_rate": [
+        {
+          "endpoints_same_component": true,
+          "n_rows": 4247,
+          "fraud_rate": 0.05133035083588415
+        },
+        {
+          "endpoints_same_component": false,
+          "n_rows": 877,
+          "fraud_rate": 0.053591790193842644
+        }
+      ],
+      "roc_auc_merged_component_size_total_vs_isFraud": 0.5166751447421047
+    },
+    "fanout_strata": [
+      {
+        "stratum": "low_fanout_lt_p25",
+        "n_rows": 1436,
+        "fraud_rate": 0.052924791086350974,
+        "merged_component_size_total_fraud_rate_by_bucket": [
+          {
+            "bucket": "merged_size_lt_p25",
+            "n_rows": 24,
+            "fraud_rate": 0.16666666666666666
+          },
+          {
+            "bucket": "merged_size_p25_to_p50",
+            "n_rows": 0,
+            "fraud_rate": NaN
+          },
+          {
+            "bucket": "merged_size_p50_to_p75",
+            "n_rows": 0,
+            "fraud_rate": NaN
+          },
+          {
+            "bucket": "merged_size_p75_to_p90",
+            "n_rows": 113,
+            "fraud_rate": 0.07079646017699115
+          },
+          {
+            "bucket": "merged_size_ge_p90",
+            "n_rows": 1299,
+            "fraud_rate": 0.049268668206312545
+          }
+        ],
+        "endpoints_same_component_fraud_rate": [
+          {
+            "endpoints_same_component": true,
+            "n_rows": 1120,
+            "fraud_rate": 0.05357142857142857
+          },
+          {
+            "endpoints_same_component": false,
+            "n_rows": 316,
+            "fraud_rate": 0.05063291139240506
+          }
+        ],
+        "roc_auc_merged_component_size_total_vs_isFraud": 0.4734810371517028
+      },
+      {
+        "stratum": "mid_fanout_p25_to_p50",
+        "n_rows": 906,
+        "fraud_rate": 0.046357615894039736,
+        "merged_component_size_total_fraud_rate_by_bucket": [
+          {
+            "bucket": "merged_size_lt_p25",
+            "n_rows": 0,
+            "fraud_rate": NaN
+          },
+          {
+            "bucket": "merged_size_p25_to_p50",
+            "n_rows": 0,
+            "fraud_rate": NaN
+          },
+          {
+            "bucket": "merged_size_p50_to_p75",
+            "n_rows": 0,
+            "fraud_rate": NaN
+          },
+          {
+            "bucket": "merged_size_p75_to_p90",
+            "n_rows": 137,
+            "fraud_rate": 0.021897810218978103
+          },
+          {
+            "bucket": "merged_size_ge_p90",
+            "n_rows": 769,
+            "fraud_rate": 0.05071521456436931
+          }
+        ],
+        "endpoints_same_component_fraud_rate": [
+          {
+            "endpoints_same_component": true,
+            "n_rows": 780,
+            "fraud_rate": 0.05
+          },
+          {
+            "endpoints_same_component": false,
+            "n_rows": 126,
+            "fraud_rate": 0.023809523809523808
+          }
+        ],
+        "roc_auc_merged_component_size_total_vs_isFraud": 0.5492035934744268
+      },
+      {
+        "stratum": "mid_fanout_p50_to_p75",
+        "n_rows": 777,
+        "fraud_rate": 0.03088803088803089,
+        "merged_component_size_total_fraud_rate_by_bucket": [
+          {
+            "bucket": "merged_size_lt_p25",
+            "n_rows": 0,
+            "fraud_rate": NaN
+          },
+          {
+            "bucket": "merged_size_p25_to_p50",
+            "n_rows": 0,
+            "fraud_rate": NaN
+          },
+          {
+            "bucket": "merged_size_p50_to_p75",
+            "n_rows": 0,
+            "fraud_rate": NaN
+          },
+          {
+            "bucket": "merged_size_p75_to_p90",
+            "n_rows": 45,
+            "fraud_rate": 0.08888888888888889
+          },
+          {
+            "bucket": "merged_size_ge_p90",
+            "n_rows": 732,
+            "fraud_rate": 0.0273224043715847
+          }
+        ],
+        "endpoints_same_component_fraud_rate": [
+          {
+            "endpoints_same_component": true,
+            "n_rows": 649,
+            "fraud_rate": 0.029275808936825885
+          },
+          {
+            "endpoints_same_component": false,
+            "n_rows": 128,
+            "fraud_rate": 0.0390625
+          }
+        ],
+        "roc_auc_merged_component_size_total_vs_isFraud": 0.4774789729969013
+      },
+      {
+        "stratum": "high_fanout_ge_p75",
+        "n_rows": 2005,
+        "fraud_rate": 0.06134663341645885,
+        "merged_component_size_total_fraud_rate_by_bucket": [
+          {
+            "bucket": "merged_size_lt_p25",
+            "n_rows": 0,
+            "fraud_rate": NaN
+          },
+          {
+            "bucket": "merged_size_p25_to_p50",
+            "n_rows": 0,
+            "fraud_rate": NaN
+          },
+          {
+            "bucket": "merged_size_p50_to_p75",
+            "n_rows": 0,
+            "fraud_rate": NaN
+          },
+          {
+            "bucket": "merged_size_p75_to_p90",
+            "n_rows": 175,
+            "fraud_rate": 0.08
+          },
+          {
+            "bucket": "merged_size_ge_p90",
+            "n_rows": 1830,
+            "fraud_rate": 0.059562841530054644
+          }
+        ],
+        "endpoints_same_component_fraud_rate": [
+          {
+            "endpoints_same_component": true,
+            "n_rows": 1698,
+            "fraud_rate": 0.05889281507656066
+          },
+          {
+            "endpoints_same_component": false,
+            "n_rows": 307,
+            "fraud_rate": 0.0749185667752443
+          }
+        ],
+        "roc_auc_merged_component_size_total_vs_isFraud": 0.5264162843541295
+      }
+    ],
+    "conclusion": "ROC-AUC for merged_component_size_total vs. isFraud was computable in 4/4 fan-out strata; it was above 0.5 (better than chance ranking) in 2/4 of those. A monotonic non-decreasing fraud-rate gradient across the fixed merged_component_size_total buckets held in 1/4 strata. CONCLUSION: the pattern does not clearly persist once fan-out is controlled for -- consistent with the same population-generic-value/hub-domination confound Phase E.1's M5-vs-M5b correction found for raw overlap. Most of the unstratified signal, if any, is not shown to be beyond fan-out by this evaluation.\n\nPer-stratum detail:\n- low_fanout_lt_p25 (n=1436): AUC=0.4735, bucket fraud-rate monotonic non-decreasing=False\n- mid_fanout_p25_to_p50 (n=906): AUC=0.5492, bucket fraud-rate monotonic non-decreasing=True\n- mid_fanout_p50_to_p75 (n=777): AUC=0.4775, bucket fraud-rate monotonic non-decreasing=False\n- high_fanout_ge_p75 (n=2005): AUC=0.5264, bucket fraud-rate monotonic non-decreasing=False"
+  }
+}
