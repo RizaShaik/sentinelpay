@@ -1,9 +1,12 @@
+import numpy as np
 import pandas as pd
 import pytest
 
 from sentinelpay.data.history import (
     prior_group_count,
     prior_group_amount_stats,
+    prior_group_distinct_other_count,
+    prior_group_windowed_distinct_other_count,
     prior_group_windowed_robust_stats,
     time_since_last_group_event,
 )
@@ -398,3 +401,316 @@ def test_no_target_dependency():
     c1 = time_since_last_group_event(df, group_col="synthetic_group", dt_col="TransactionDT")
     c2 = time_since_last_group_event(df_with_target, group_col="synthetic_group", dt_col="TransactionDT")
     pd.testing.assert_series_equal(c1, c2, check_names=False)
+
+
+# ---------------------------------------------------------------------------
+# prior_group_distinct_other_count / prior_group_windowed_distinct_other_count
+# (Phase E.1 link-sufficiency primitives)
+# ---------------------------------------------------------------------------
+
+
+def _synthetic_with_other():
+    # group A sorted by dt: 100(X), 150(Y), 200(X)/200(Z) tie, 300(Y).
+    # group B: 100(P), only row.
+    return pd.DataFrame(
+        {
+            "synthetic_group": ["A", "A", "A", "A", "B", "A"],
+            "TransactionDT": [100, 150, 200, 200, 100, 300],
+            "synthetic_other": ["X", "Y", "X", "Z", "P", "Y"],
+        }
+    )
+
+
+def test_prior_group_distinct_other_count_basic():
+    df = _synthetic_with_other()
+    out = prior_group_distinct_other_count(df, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT")
+    assert out.loc[0] == 0  # dt=100, nothing earlier
+    assert out.loc[1] == 1  # dt=150, prior partners {X}
+    assert out.loc[2] == 2  # dt=200, prior partners {X,Y} -- does not include idx3's own-bucket Z
+    assert out.loc[3] == 2  # dt=200 (tie with idx 2) -- same prior set, does not count idx2's X a second time nor see it as new
+    assert out.loc[5] == 3  # dt=300, prior partners {X,Y,Z} (X,Y,X,Z all strictly before)
+    assert out.loc[4] == 0  # group B, only row
+
+
+def test_prior_group_distinct_other_count_requires_columns():
+    df = _synthetic_with_other()
+    with pytest.raises(ValueError):
+        prior_group_distinct_other_count(df, group_col="no_such_col", other_col="synthetic_other", dt_col="TransactionDT")
+    with pytest.raises(ValueError):
+        prior_group_distinct_other_count(df, group_col="synthetic_group", other_col="no_such_col", dt_col="TransactionDT")
+    with pytest.raises(ValueError):
+        prior_group_distinct_other_count(df, group_col="synthetic_group", other_col="synthetic_other", dt_col="no_such_col")
+
+
+def test_prior_group_distinct_other_count_tied_timestamps_never_see_each_other():
+    df = pd.DataFrame(
+        {
+            "synthetic_group": ["A", "A"],
+            "TransactionDT": [500, 500],
+            "synthetic_other": ["X", "Y"],
+        }
+    )
+    out = prior_group_distinct_other_count(df, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT")
+    assert (out == 0).all()
+
+
+def test_prior_group_distinct_other_count_null_other_contributes_no_partner():
+    df = pd.DataFrame(
+        {
+            "synthetic_group": ["A", "A", "A"],
+            "TransactionDT": [100, 200, 300],
+            "synthetic_other": ["X", None, "Y"],
+        }
+    )
+    out = prior_group_distinct_other_count(df, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT")
+    assert out.loc[0] == 0
+    assert out.loc[1] == 1  # {X} -- the null row itself contributes nothing when it's the "other" side
+    assert out.loc[2] == 1  # still just {X}; the null-other row at dt=200 added no partner
+
+
+def test_prior_group_distinct_other_count_adversarial_future_perturbation():
+    df = _synthetic_with_other()
+    before = prior_group_distinct_other_count(df, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT")
+
+    df_mutated = df.copy()
+    df_mutated.loc[5, "synthetic_other"] = "BRAND_NEW_VALUE"  # idx 5 is the chronologically-last group-A row
+    after_mutation = prior_group_distinct_other_count(df_mutated, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT")
+    for idx in [0, 1, 2, 3]:
+        assert before.loc[idx] == after_mutation.loc[idx]
+
+    new_row = pd.DataFrame({"synthetic_group": ["A"], "TransactionDT": [10_000], "synthetic_other": ["ANOTHER_NEW_VALUE"]})
+    df_extended = pd.concat([df, new_row], ignore_index=True)
+    after_append = prior_group_distinct_other_count(df_extended, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT")
+    for idx in df.index:
+        assert before.loc[idx] == after_append.loc[idx]
+
+
+def test_prior_group_distinct_other_count_row_order_independence():
+    df = _synthetic_with_other()
+    shuffled = df.sample(frac=1.0, random_state=13).reset_index(drop=True)
+
+    counts_orig = prior_group_distinct_other_count(df, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT")
+    counts_shuf = prior_group_distinct_other_count(shuffled, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT")
+
+    lookup = {(g, dt): c for g, dt, c in zip(df["synthetic_group"], df["TransactionDT"], counts_orig)}
+    for g, dt, c in zip(shuffled["synthetic_group"], shuffled["TransactionDT"], counts_shuf):
+        assert lookup[(g, dt)] == c
+
+
+def test_prior_group_distinct_other_count_no_target_dependency():
+    import inspect
+
+    assert "isFraud" not in inspect.signature(prior_group_distinct_other_count).parameters
+    assert "target" not in inspect.signature(prior_group_distinct_other_count).parameters
+
+    df = _synthetic_with_other()
+    df_with_target = df.copy()
+    df_with_target["isFraud"] = [1, 0, 1, 0, 1, 0]
+    df_shuffled_target = df.copy()
+    df_shuffled_target["isFraud"] = [0, 1, 0, 1, 0, 1]
+
+    a = prior_group_distinct_other_count(df, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT")
+    b = prior_group_distinct_other_count(df_with_target, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT")
+    c = prior_group_distinct_other_count(df_shuffled_target, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT")
+    pd.testing.assert_series_equal(a, b)
+    pd.testing.assert_series_equal(a, c)
+
+
+def _brute_force_prior_distinct_other_count(df, group_col, other_col, dt_col):
+    out = []
+    for i in df.index:
+        gi, dti = df.loc[i, group_col], df.loc[i, dt_col]
+        prior = df[(df[group_col] == gi) & (df[dt_col] < dti) & df[other_col].notna()]
+        out.append(prior[other_col].nunique())
+    return pd.Series(out, index=df.index)
+
+
+def test_prior_group_distinct_other_count_matches_brute_force_on_random_data():
+    rng = np.random.default_rng(0)
+    n = 60
+    df = pd.DataFrame(
+        {
+            "synthetic_group": rng.choice(["A", "B", "C"], size=n),
+            "TransactionDT": rng.integers(0, 15, size=n),  # small range forces many ties
+            "synthetic_other": rng.choice(["p", "q", "r", "s", None], size=n),
+        }
+    )
+    fast = prior_group_distinct_other_count(df, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT")
+    slow = _brute_force_prior_distinct_other_count(df, "synthetic_group", "synthetic_other", "TransactionDT")
+    pd.testing.assert_series_equal(fast, slow.astype("int64"), check_names=False)
+
+
+def _windowed_synthetic_with_other_no_ties():
+    return pd.DataFrame(
+        {
+            "synthetic_group": ["A"] * 5,
+            "TransactionDT": [100, 150, 200, 250, 300],
+            "synthetic_other": ["X", "Y", "X", "Z", "Y"],
+        }
+    )
+
+
+def test_prior_group_windowed_distinct_other_count_basic_no_ties():
+    df = _windowed_synthetic_with_other_no_ties()
+    out = prior_group_windowed_distinct_other_count(
+        df, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT", window_size_events=2
+    )
+    assert out.loc[0, "prior_count_in_window"] == 0
+    assert out.loc[0, "prior_distinct_other_count_in_window"] == 0
+
+    assert out.loc[1, "prior_count_in_window"] == 1  # only dt=100 (X) available
+    assert out.loc[1, "prior_distinct_other_count_in_window"] == 1
+
+    assert out.loc[2, "prior_count_in_window"] == 2  # window = dt=100(X), dt=150(Y)
+    assert out.loc[2, "prior_distinct_other_count_in_window"] == 2
+
+    assert out.loc[3, "prior_count_in_window"] == 2  # window = dt=150(Y), dt=200(X)
+    assert out.loc[3, "prior_distinct_other_count_in_window"] == 2
+
+    assert out.loc[4, "prior_count_in_window"] == 2  # window = dt=200(X), dt=250(Z)
+    assert out.loc[4, "prior_distinct_other_count_in_window"] == 2
+
+
+def test_prior_group_windowed_distinct_other_count_tied_boundary_bucket_distinguishes_raw_from_distinct():
+    # window_size_events=3; boundary bucket at dt=1 has 3 tied rows whose
+    # other_col values are P, P, Q (a duplicate WITHIN the bucket itself --
+    # raw row count 3, distinct count only 2); dt=2 bucket has a single row
+    # valued "T". Raw prior_count_in_window must be 4 (whole boundary bucket
+    # included, never split, counting rows not distinct values) while the
+    # DISTINCT count must be 3 ({P, Q, T}) -- this specifically exercises
+    # _bucket_count being a raw row count, not accidentally the size of the
+    # deduped value set (a bug that would coincidentally pass if every
+    # bucket's own values happened to already be distinct).
+    df = pd.DataFrame(
+        {
+            "synthetic_group": ["A"] * 5,
+            "TransactionDT": [1, 1, 1, 2, 3],
+            "synthetic_other": ["P", "P", "Q", "T", "Z"],
+        }
+    )
+    out = prior_group_windowed_distinct_other_count(
+        df, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT", window_size_events=3
+    )
+    target_idx = df.index[df["TransactionDT"] == 3][0]
+    assert out.loc[target_idx, "prior_count_in_window"] == 4
+    assert out.loc[target_idx, "prior_distinct_other_count_in_window"] == 3
+
+
+def test_prior_group_windowed_distinct_other_count_tied_timestamps_never_see_each_other():
+    df = pd.DataFrame(
+        {
+            "synthetic_group": ["A", "A"],
+            "TransactionDT": [500, 500],
+            "synthetic_other": ["X", "Y"],
+        }
+    )
+    out = prior_group_windowed_distinct_other_count(
+        df, group_col="synthetic_group", other_col="synthetic_other", dt_col="TransactionDT", window_size_events=5
+    )
+    assert (out["prior_count_in_window"] == 0).all()
+    assert (out["prior_distinct_other_count_in_window"] == 0).all()
+
+
+def test_prior_group_windowed_distinct_other_count_row_order_independence():
+    df = _windowed_synthetic_with_other_no_ties()
+    shuffled = df.sample(frac=1.0, random_state=17).reset_index(drop=True)
+
+    out_orig = prior_group_windowed_distinct_other_count(
+        df, "synthetic_group", "synthetic_other", "TransactionDT", window_size_events=2
+    )
+    out_shuf = prior_group_windowed_distinct_other_count(
+        shuffled, "synthetic_group", "synthetic_other", "TransactionDT", window_size_events=2
+    )
+    lookup = {
+        dt: (dcnt, rcnt)
+        for dt, dcnt, rcnt in zip(
+            df["TransactionDT"], out_orig["prior_distinct_other_count_in_window"], out_orig["prior_count_in_window"]
+        )
+    }
+    for dt, dcnt, rcnt in zip(
+        shuffled["TransactionDT"], out_shuf["prior_distinct_other_count_in_window"], out_shuf["prior_count_in_window"]
+    ):
+        exp_dcnt, exp_rcnt = lookup[dt]
+        assert dcnt == exp_dcnt
+        assert rcnt == exp_rcnt
+
+
+def test_prior_group_windowed_distinct_other_count_future_perturbation_does_not_change_earlier_rows():
+    df = _windowed_synthetic_with_other_no_ties()
+    before = prior_group_windowed_distinct_other_count(
+        df, "synthetic_group", "synthetic_other", "TransactionDT", window_size_events=2
+    )
+
+    df_mutated = df.copy()
+    last_idx = df_mutated["TransactionDT"].idxmax()
+    df_mutated.loc[last_idx, "synthetic_other"] = "BRAND_NEW_VALUE"
+    df_mutated.loc[last_idx, "TransactionDT"] = 999_999
+    after = prior_group_windowed_distinct_other_count(
+        df_mutated, "synthetic_group", "synthetic_other", "TransactionDT", window_size_events=2
+    )
+
+    for idx in [i for i in df.index if i != last_idx]:
+        assert before.loc[idx, "prior_distinct_other_count_in_window"] == after.loc[idx, "prior_distinct_other_count_in_window"]
+        assert before.loc[idx, "prior_count_in_window"] == after.loc[idx, "prior_count_in_window"]
+
+
+def test_prior_group_windowed_distinct_other_count_requires_columns():
+    df = _windowed_synthetic_with_other_no_ties()
+    with pytest.raises(ValueError):
+        prior_group_windowed_distinct_other_count(df, "no_such_col", "synthetic_other", "TransactionDT", window_size_events=2)
+    with pytest.raises(ValueError):
+        prior_group_windowed_distinct_other_count(df, "synthetic_group", "no_such_col", "TransactionDT", window_size_events=2)
+    with pytest.raises(ValueError):
+        prior_group_windowed_distinct_other_count(df, "synthetic_group", "synthetic_other", "no_such_col", window_size_events=2)
+
+
+def test_prior_group_windowed_distinct_other_count_requires_positive_window():
+    df = _windowed_synthetic_with_other_no_ties()
+    with pytest.raises(ValueError):
+        prior_group_windowed_distinct_other_count(df, "synthetic_group", "synthetic_other", "TransactionDT", window_size_events=0)
+    with pytest.raises(ValueError):
+        prior_group_windowed_distinct_other_count(df, "synthetic_group", "synthetic_other", "TransactionDT", window_size_events=-1)
+
+
+def test_prior_group_windowed_distinct_other_count_no_target_dependency():
+    import inspect
+
+    assert "isFraud" not in inspect.signature(prior_group_windowed_distinct_other_count).parameters
+    assert "target" not in inspect.signature(prior_group_windowed_distinct_other_count).parameters
+
+    df = _windowed_synthetic_with_other_no_ties()
+    df_with_target = df.copy()
+    df_with_target["isFraud"] = [1, 0, 1, 0, 1]
+    df_shuffled_target = df.copy()
+    df_shuffled_target["isFraud"] = [0, 1, 0, 1, 0]
+
+    a = prior_group_windowed_distinct_other_count(df, "synthetic_group", "synthetic_other", "TransactionDT", window_size_events=2)
+    b = prior_group_windowed_distinct_other_count(df_with_target, "synthetic_group", "synthetic_other", "TransactionDT", window_size_events=2)
+    c = prior_group_windowed_distinct_other_count(df_shuffled_target, "synthetic_group", "synthetic_other", "TransactionDT", window_size_events=2)
+    pd.testing.assert_frame_equal(a, b)
+    pd.testing.assert_frame_equal(a, c)
+
+
+def test_prior_group_windowed_distinct_other_count_non_default_and_duplicate_index_alignment():
+    df = _windowed_synthetic_with_other_no_ties()
+    baseline = prior_group_windowed_distinct_other_count(
+        df, "synthetic_group", "synthetic_other", "TransactionDT", window_size_events=2
+    )
+    expected_by_dt = {
+        dt: (dcnt, rcnt)
+        for dt, dcnt, rcnt in zip(
+            df["TransactionDT"], baseline["prior_distinct_other_count_in_window"], baseline["prior_count_in_window"]
+        )
+    }
+
+    df_custom_index = df.copy()
+    df_custom_index.index = [100, 205, 7, 999, 3]
+    out_custom = prior_group_windowed_distinct_other_count(
+        df_custom_index, "synthetic_group", "synthetic_other", "TransactionDT", window_size_events=2
+    )
+    assert list(out_custom.index) == list(df_custom_index.index)
+    for idx in df_custom_index.index:
+        dt = df_custom_index.loc[idx, "TransactionDT"]
+        exp_dcnt, exp_rcnt = expected_by_dt[dt]
+        assert out_custom.loc[idx, "prior_distinct_other_count_in_window"] == exp_dcnt
+        assert out_custom.loc[idx, "prior_count_in_window"] == exp_rcnt

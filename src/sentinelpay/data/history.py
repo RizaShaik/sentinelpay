@@ -17,7 +17,14 @@ a Phase D/E decision.
 
 No target dependency: none of these functions accepts or reads `isFraud` (or
 any target column). They compute non-target aggregates only (counts, sums,
-means, recency of `amount_col`/`dt_col`).
+means, recency of `amount_col`/`dt_col`, and distinct-value counts of an
+`other_col`).
+
+`prior_group_distinct_other_count`/`prior_group_windowed_distinct_other_count`
+extend this same family to a second column: distinct-value fan-out of
+`other_col` among strictly-prior same-`group_col` rows (unbounded and
+event-windowed respectively). Same four causal invariants, same generic/
+non-target contract -- see their docstrings.
 
 Embargo note (applies wherever these utilities are eventually applied to
 train/embargo_1/validation/embargo_2 data): these are non-target aggregates,
@@ -217,6 +224,185 @@ def prior_group_windowed_robust_stats(
 
     merged = left_key.merge(right_key, on=[group_col, dt_col], how="left").sort_values("_pos", ignore_index=True)
     result = merged[["prior_median", "prior_mad", "prior_count_in_window"]]
+    result.index = df.index
+    return result
+
+
+def prior_group_distinct_other_count(df: pd.DataFrame, group_col: str, other_col: str, dt_col: str) -> pd.Series:
+    """Count of DISTINCT `other_col` values among strictly-prior same-`group_col`
+    rows, aligned to `df.index`.
+
+    Causal contract (same four invariants as `prior_group_count`):
+    - Strictly-earlier only: for row i, only same-group rows with `dt_col`
+      strictly less than row i's `dt_col` are ever eligible.
+    - Ties never see each other: rows sharing `(group_col, dt_col)` are
+      collapsed into one bucket first; a bucket's own values are folded into
+      the running distinct-value set only AFTER that bucket's prior count is
+      recorded, so tied rows share the same result and never count each
+      other's `other_col` value.
+    - Row-order independence: buckets are built and processed by
+      `(group_col, dt_col)` value only, sorted within each group -- never by
+      row position.
+    - Future perturbation invariance: a group's buckets are walked in
+      increasing `dt_col` order, accumulating a running set; a later
+      bucket's values are only ever added to the running set AFTER every
+      earlier bucket's prior count has already been read off, so mutating or
+      appending a row at or after row i's `dt_col` cannot change row i's
+      result.
+
+    Rows with a missing `other_col` value do not contribute a partner to any
+    bucket (dropped before bucketing, not counted as a distinct "unknown"
+    partner) -- this function does not impute or dedupe NaN as a value.
+    """
+    for col in (group_col, other_col, dt_col):
+        if col not in df.columns:
+            raise ValueError(f"prior_group_distinct_other_count requires column '{col}'")
+
+    # Bucket keys come from EVERY (group_col, dt_col) pair in df, not just
+    # ones with a non-null other_col: a row whose own other_col is null (but
+    # who shares its bucket with no other row) must still see the correct
+    # prior-buckets' partner set -- it must not vanish from the walk just
+    # because its own bucket's value-set happens to be empty.
+    # Every merge's dt_col is forced to int64 explicitly on BOTH sides (not
+    # just matched to each other) -- see prior_group_windowed_robust_stats
+    # for why: even two columns reporting the "same" dtype can trigger a
+    # Cython buffer-dtype mismatch in pandas' merge-key factorizer on
+    # Windows (numpy's platform-default integer dtype is 32-bit there).
+    all_keys = df[[group_col, dt_col]].drop_duplicates().copy()
+    all_keys[dt_col] = all_keys[dt_col].astype("int64")
+    non_null = df[[group_col, dt_col, other_col]].dropna(subset=[other_col])
+    value_sets = (
+        non_null.groupby([group_col, dt_col], observed=True)[other_col]
+        .apply(lambda s: frozenset(s.tolist()))
+        .rename("_bucket_values")
+        .reset_index()
+    )
+    value_sets[dt_col] = value_sets[dt_col].astype("int64")
+    bucket = all_keys.merge(value_sets, on=[group_col, dt_col], how="left")
+    empty = frozenset()
+    bucket["_bucket_values"] = bucket["_bucket_values"].apply(lambda v: v if isinstance(v, frozenset) else empty)
+    bucket = bucket.sort_values([group_col, dt_col], ignore_index=True)
+
+    n_buckets = len(bucket)
+    prior_distinct = np.zeros(n_buckets, dtype="int64")
+    for _, sub in bucket.groupby(group_col, observed=True, sort=False):
+        idx = sub.index.to_numpy()
+        values = sub["_bucket_values"].to_numpy()
+        running: set = set()
+        for pos_in_group, i in enumerate(idx):
+            prior_distinct[i] = len(running)
+            running |= values[pos_in_group]
+    bucket["prior_distinct_other_count"] = prior_distinct
+
+    left_key = df[[group_col, dt_col]].copy()
+    left_key[dt_col] = left_key[dt_col].astype("int64")
+    left_key["_pos"] = np.arange(len(df))
+
+    right_key = bucket[[group_col, dt_col, "prior_distinct_other_count"]].copy()
+    right_key[dt_col] = right_key[dt_col].astype("int64")
+
+    merged = left_key.merge(right_key, on=[group_col, dt_col], how="left").sort_values("_pos", ignore_index=True)
+    # A (group_col, dt_col) bucket with no non-null other_col anywhere is
+    # absent from `bucket` entirely (dropped pre-groupby) -- such rows get
+    # no merge match and are filled to 0 prior distinct partners.
+    result = merged["prior_distinct_other_count"].fillna(0).astype("int64")
+    result.index = df.index
+    return result.rename("prior_distinct_other_count")
+
+
+def prior_group_windowed_distinct_other_count(
+    df: pd.DataFrame,
+    group_col: str,
+    other_col: str,
+    dt_col: str,
+    window_size_events: int,
+) -> pd.DataFrame:
+    """Distinct `other_col` count over an event-count window of the most
+    recent strictly-prior same-`group_col` rows, aligned to `df.index`.
+
+    Returns columns `prior_distinct_other_count_in_window`,
+    `prior_count_in_window`. Follows the exact same whole-bucket-at-the-
+    boundary window rule as `prior_group_windowed_robust_stats` (see that
+    function's docstring for the four causal invariants, satisfied
+    identically here) -- accumulating a running SET of distinct `other_col`
+    values within the window instead of a numeric array for median/MAD.
+    Rows with a missing `other_col` value do not contribute a partner to any
+    bucket.
+    """
+    for col in (group_col, other_col, dt_col):
+        if col not in df.columns:
+            raise ValueError(f"prior_group_windowed_distinct_other_count requires column '{col}'")
+    if window_size_events <= 0:
+        raise ValueError("window_size_events must be a positive integer")
+
+    # Bucket keys and _bucket_count (raw row count -- the quantity the
+    # window-size threshold accumulates against, same meaning as in
+    # prior_group_windowed_robust_stats) come from EVERY row in df, matching
+    # prior_group_distinct_other_count's reasoning. _bucket_values (the
+    # DISTINCT non-null other_col set used only for the union) is a separate
+    # column -- deliberately not reused as the row-count source, since a
+    # bucket can contain duplicate other_col values across its own rows
+    # (raw count > distinct count even within one bucket).
+    # Every merge's dt_col is forced to int64 explicitly on BOTH sides -- see
+    # prior_group_distinct_other_count for why matching-but-not-int64 dtypes
+    # are not sufficient on Windows.
+    raw_counts = (
+        df.groupby([group_col, dt_col], observed=True).size().rename("_bucket_count").reset_index()
+    )
+    raw_counts[dt_col] = raw_counts[dt_col].astype("int64")
+    non_null = df[[group_col, dt_col, other_col]].dropna(subset=[other_col])
+    value_sets = (
+        non_null.groupby([group_col, dt_col], observed=True)[other_col]
+        .apply(lambda s: frozenset(s.tolist()))
+        .rename("_bucket_values")
+        .reset_index()
+    )
+    value_sets[dt_col] = value_sets[dt_col].astype("int64")
+    bucket = raw_counts.merge(value_sets, on=[group_col, dt_col], how="left")
+    empty = frozenset()
+    bucket["_bucket_values"] = bucket["_bucket_values"].apply(lambda v: v if isinstance(v, frozenset) else empty)
+    bucket["_bucket_count"] = bucket["_bucket_count"].astype("int64")
+    bucket = bucket.sort_values([group_col, dt_col], ignore_index=True)
+
+    n_buckets = len(bucket)
+    prior_distinct_in_window = np.zeros(n_buckets, dtype="int64")
+    prior_count_in_window = np.zeros(n_buckets, dtype="int64")
+
+    for _, sub in bucket.groupby(group_col, observed=True, sort=False):
+        idx = sub.index.to_numpy()
+        counts = sub["_bucket_count"].to_numpy()
+        values = sub["_bucket_values"].to_numpy()
+        n = len(idx)
+        lo = 0
+        running_sum = 0
+        for i in range(n):
+            # Same minimal-window shrink rule as prior_group_windowed_robust_stats.
+            while lo < i and (running_sum - counts[lo]) >= window_size_events:
+                running_sum -= counts[lo]
+                lo += 1
+            pos = idx[i]
+            prior_count_in_window[pos] = running_sum
+            if running_sum > 0:
+                window_set: set = set()
+                for b in values[lo:i]:
+                    window_set |= b
+                prior_distinct_in_window[pos] = len(window_set)
+            running_sum += counts[i]
+
+    bucket["prior_distinct_other_count_in_window"] = prior_distinct_in_window
+    bucket["prior_count_in_window"] = prior_count_in_window
+
+    left_key = df[[group_col, dt_col]].copy()
+    left_key[dt_col] = left_key[dt_col].astype("int64")
+    left_key["_pos"] = np.arange(len(df))
+
+    right_key = bucket[
+        [group_col, dt_col, "prior_distinct_other_count_in_window", "prior_count_in_window"]
+    ].copy()
+    right_key[dt_col] = right_key[dt_col].astype("int64")
+
+    merged = left_key.merge(right_key, on=[group_col, dt_col], how="left").sort_values("_pos", ignore_index=True)
+    result = merged[["prior_distinct_other_count_in_window", "prior_count_in_window"]].fillna(0).astype("int64")
     result.index = df.index
     return result
 

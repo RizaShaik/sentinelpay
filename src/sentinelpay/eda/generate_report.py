@@ -592,6 +592,345 @@ def render_phase_d1_report(results: dict, report_path: Path) -> None:
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+_PHASE_E1_SCOPE_SECTION = """
+## Scope (what Phase E.1 is, and deliberately is not)
+
+Phase E.1 is a narrow, non-target link/relationship sufficiency and causal
+cross-key fan-out measurement. Its only question, per direction: does
+anchor_node have enough strictly-causal distinct-partner fan-out with
+other_node to be worth building a future Phase E.2 ring/fraud-network
+mechanism on? Explicitly out of scope, per the approved E.1 proposal:
+
+- **No target of any kind.** `isFraud` is never loaded, never read, never
+  compared to any relationship. Nothing below is a fraud rate. There is no
+  diagnostic-evaluation step at all in this phase -- stronger than Phase D
+  (which reads `isFraud` exactly once, downstream of every score), matching
+  Phase D.1's own precedent exactly.
+- **No Union-Find, no connected components, no multi-hop/transitive graph
+  traversal, no persistent graph structure.** Both overlap diagnostics below
+  (M5 and M5b) are bounded and non-recursive: at most one pairwise
+  set-intersection per pair of high-fan-out anchors, never chained through a
+  third anchor.
+- **No scoring, no flags, no `configs/detection.yaml`-style persistence.**
+- **Reduced first-pass scope**: only 6 of the 13 directions in the full
+  proposal are measured here (payment_node <-> device_node, payment_node <->
+  email_purchaser_node, device_node <-> email_purchaser_node) --
+  `email_recipient_node`/`addr_only_node` are measured columns available for
+  a cheap follow-up, not yet analyzed (see section 6). This correction pass
+  (M5b) does not change that scope.
+- **No production Union-Find/E.2 decision made in advance.** The
+  recommendation below (`recommend_union_find_for_e2`) is a pure function of
+  the measured results in this report -- not a preference decided before
+  this analysis ran, and a `True` result means "investigating Union-Find is
+  evidenced," never "simple per-anchor fan-out is invalid."
+- **M5 vs. M5b**: `overlap_diagnostic` (M5) is DESCRIPTIVE ONLY below --
+  raw partner-set overlap, reported for context. A critical review of this
+  phase's first real-data results found M5's raw numbers dominated by
+  population-generic partner values (the most common browser/OS strings, the
+  most common email domains), not evidence of coordinated structure.
+  `frequency_adjusted_overlap_diagnostic` (M5b) -- overlap compared against a
+  population-prevalence null baseline -- is the sole DECISION-DRIVING
+  diagnostic for `recommend_union_find_for_e2`. See section 6 for both
+  diagnostics' causal constructions.
+- **`configs/split.yaml` boundaries are unchanged.**
+"""
+
+_PHASE_E1_METHOD_SECTION = """
+## Method
+
+For each direction (anchor_col -> other_col), rows missing either column are
+excluded (not imputed) before analysis via
+`sentinelpay.eda.link_sufficiency.build_relationship_frame`. `_payment_node`/
+`_device_node` are built via `build_node_key_column` -- a row-PRESERVING join
+(unlike D.1's `build_group_key`): a row missing payment_node's components
+stays available, as NaN in that column, for the device_node/email_purchaser_node
+relationships that don't need it. `email_purchaser_node` is `P_emaildomain`
+used directly.
+
+**M1/M2 (distinct-count distributions and sufficiency-at-thresholds)**: for
+every row, the number of DISTINCT `other_col` values among strictly-prior
+same-anchor rows is counted by `sentinelpay.data.history.prior_group_distinct_other_count`
+(unbounded) and `prior_group_windowed_distinct_other_count` (per candidate
+window in {5, 10, 20, 50} events) -- both delegated, not re-implemented here;
+see `tests/test_history.py` for the causal-correctness evidence (no
+self-count, tied timestamps never see each other, no future leakage,
+row-order independence) and `tests/test_link_sufficiency.py` for this
+module's own tests against that guarantee.
+
+**M3 (relationship row coverage)**: the % of development rows with both
+relationship columns non-null -- the intersection of two individual node
+coverages, computed once per relationship pair (symmetric) and shared by
+both of that pair's directions.
+
+**M4 (dominant-node concentration)**: anchor-side reuses D.1's own
+`dominant_group_exclusion_sensitivity` (recomputing M1/M2 after excluding
+the top-K largest anchor groups) applied to the distinct-partner-count
+series; other-side is new -- the raw group-size distribution of `other_col`
+alone, plus the % of valid (anchor, other) pairs whose `other_col` value is
+one of the top-K most popular `other_col` values overall (the reverse-hub
+check D.1 never needed, since it only ever had one column per key).
+
+**M5 (one-hop overlap diagnostic, DESCRIPTIVE ONLY)** and **M5b
+(frequency-adjusted overlap diagnostic, DECISION-DRIVING)** are both described in full,
+with their precise causal constructions, below.
+"""
+
+_PHASE_E1_M5_SECTION = """
+## M5 causal construction (recap) -- descriptive only, does not drive the recommendation
+
+1. Each anchor's fan-out summary is the MAXIMUM of its own rows'
+   `prior_distinct_other_count` values -- equal to the value at that
+   anchor's own chronologically last row, a fact about its own history only.
+2. Its partner set is the set of distinct `other_col` values seen at any of
+   its rows strictly before its own last `dt_col`.
+3. High-fan-out anchors are those at or above the 99th percentile VALUE of
+   the PER-ANCHOR (not per-row) fan-out distribution within that
+   relationship -- this percentile-VALUE selection degenerates to a single
+   anchor whenever the relationship has a small number of distinct anchors
+   (e.g. `P_emaildomain`'s 59 values), independent of the real underlying
+   structure; M5b (below) fixes this.
+4. For each pair of distinct high-fan-out anchors, at most one set
+   intersection of their partner sets is computed -- never chained through a
+   third anchor, no persistent structure built or updated.
+5. Tie/future-leakage guarantees are inherited directly from
+   `prior_group_distinct_other_count`'s own invariants, since every partner
+   set is built from its output.
+
+A critical review of this phase's first real-data results found M5's raw
+overlap percentages dominated by population-generic partner values (the most
+common browser/OS strings, the most common email domains) -- shared by
+nearly every high-fan-out anchor regardless of any real coordination, and
+essentially unchanged even after excluding the top-10 most universally-shared
+values. M5's numbers below are retained for descriptive context only.
+
+## M5b causal construction (recap) -- the decision-driving diagnostic
+
+M5b asks a different question: "do high-fan-out anchors share partners more
+often than the population-wide popularity of those partner values alone
+would predict?"
+
+1. **Anchor selection is rank-COUNT based, not percentile-VALUE based**:
+   `n_target = max(HIGH_FANOUT_MIN_ANCHOR_COUNT, ceil((100-HIGH_FANOUT_PERCENTILE)/100 * n_anchors_total))`,
+   clamped to the number of anchors with nonzero fan-out, with every anchor
+   tied at the selection-boundary rank included. This is the fix for M5's
+   small-anchor-population degeneracy above.
+2. Partner sets are constructed identically to M5 (steps 1-2 above) for both
+   the selected high-fan-out anchors and, separately, for EVERY anchor in the
+   relationship (not just the high-fan-out subset) to build a population
+   PREVALENCE baseline: `prevalence(v)` = the fraction of all anchors whose
+   partner set contains `v`.
+3. **Expected overlap under a null model**: treating each of an anchor's
+   `H-1` other high-fan-out peers as an independent Bernoulli trial with
+   success probability `prevalence(v)` for each of that anchor's own actual
+   partner values `v` -- a standard association-strength approximation, not
+   an exact combinatorial or permutation null (a permutation test was
+   considered and rejected on computational-cost grounds).
+4. `lift_ratio = mean_observed_overlap_pct / max(mean_expected_overlap_pct, LIFT_EPSILON)`
+   -- aggregated as ratio-of-means (each side averaged across the H anchors
+   first, then divided), not mean-of-ratios, to avoid a handful of anchors
+   with near-zero expected overlap producing unstable, dominating individual
+   values.
+5. Bounded and non-recursive, exactly like M5: at most one pairwise set
+   intersection per pair of high-fan-out anchors, no persistent structure,
+   no chaining through a third anchor.
+
+**Causal semantics, precisely**: every partner set -- both M5's and M5b's --
+is strictly causal RELATIVE TO EACH ANCHOR'S OWN CUTOFF (that anchor's own
+last `dt_col`); this per-anchor guarantee is unchanged and fully tested. The
+population PREVALENCE baseline, however, is an AGGREGATE over every anchor's
+(each different) cutoff -- it is a fixed snapshot of this run's development
+window, NOT a claim that recomputing it after some change elsewhere in the
+dataset would leave it unchanged, and not something meant to be recomputed
+incrementally as new rows arrive. E.1 as a whole is an offline sufficiency
+measurement over a fixed development window, not an online/streaming feature
+computation.
+"""
+
+
+def _direction_section(title: str, entry: dict) -> list[str]:
+    lines: list[str] = []
+    analysis = entry["analysis"]
+    coverage = entry["coverage"]
+    ev = entry["evaluation"]
+    overlap = entry["overlap"]
+    frequency_adjusted_overlap = entry["frequency_adjusted_overlap"]
+
+    lines.append(f"\n### {title}\n")
+    lines.append(
+        f"- anchor_col: `{entry['anchor_col']}` | other_col: `{entry['other_col']}` | "
+        f"relationship pair: `{entry['relationship_pair']}`.\n"
+        f"- Relationship row coverage (M3): **{coverage['n_rows_valid']:,}** / "
+        f"{coverage['n_rows_development']:,} development rows (**{coverage['pct_rows_valid']:.2f}%**).\n"
+        f"- Anchor groups: **{analysis['n_anchor_groups']:,}**, of which "
+        f"**{analysis['n_anchor_singleton_groups']:,}** are singletons. Largest anchor group: "
+        f"**{analysis['max_anchor_group_size']:,}** rows; median **{analysis['median_anchor_group_size']:.1f}**."
+    )
+
+    lines.append("\n**Unbounded strictly-prior distinct-partner-count distribution (M1):**\n")
+    dist = analysis["unbounded"]["prior_count_distribution"]
+    if dist:
+        lines.append(_table([dist], columns=["min", "p25", "p50", "p75", "p90", "p99", "max", "mean"]))
+
+    lines.append("\n**Sufficiency by threshold, overall (M2, unbounded):**\n")
+    overall = analysis["unbounded"]["sufficiency_overall"]
+    lines.append(_table([{f">= {t}": pct for t, pct in overall.items()}]))
+
+    lines.append("\n**Sufficiency by threshold, by partition (unbounded):**\n")
+    lines.append(_table(analysis["unbounded"]["sufficiency_by_partition"]))
+
+    lines.append("\n**Anchor-side dominant-group exclusion sensitivity (M4):**\n")
+    lines.append(_table(analysis["unbounded"]["dominant_anchor_exclusion_sensitivity"]))
+
+    lines.append("\n**Other-side dominant concentration (M4, reverse-hub check):**\n")
+    other_stats = analysis["other_side_dominant_concentration"]["other_group_size_summary_stats"]
+    lines.append(
+        f"- `other_col` groups: **{other_stats['n_groups']:,}**, largest **{other_stats['max_group_size']:,}** rows, "
+        f"median **{other_stats['median_group_size']:.1f}**.\n"
+    )
+    lines.append(_table(analysis["other_side_dominant_concentration"]["top_k_concentration"]))
+
+    lines.append("\n**Windowed sufficiency-at-decision-threshold summary (M1/M2, per candidate window):**\n")
+    windowed_rows = [
+        {
+            "window_size_events": w,
+            **{f">= {t}": pct for t, pct in w_result["sufficiency_overall"].items()},
+        }
+        for w, w_result in analysis["windowed"].items()
+    ]
+    lines.append(_table(windowed_rows))
+
+    lines.append(
+        f"\n**Evaluation** (decision_threshold={ev['decision_threshold']}): row coverage "
+        f"**{ev['row_coverage_pct']:.2f}%** (row_coverage_ok: **{ev['row_coverage_ok']}**) | "
+        f"overall fan-out sufficiency **{ev['overall_fanout_sufficiency_pct']:.2f}%** "
+        f"(fanout_density_ok: **{ev['fanout_density_ok']}**) | "
+        f"partition_stability_ok: **{ev['partition_stability_ok']}** | "
+        f"dominant_anchor_robustness_ok: **{ev['dominant_anchor_robustness_ok']}** "
+        f"(worst case after exclusion: {ev['worst_case_sufficiency_pct_after_exclusion']:.2f}%) | "
+        f"**is_suitable: {ev['is_suitable']}** | "
+        f"recommended_window: **{entry['recommended_window'] if entry['recommended_window'] is not None else 'unbounded only'}**."
+    )
+
+    lines.append(
+        f"\n**M5 overlap diagnostic (descriptive only -- does not drive the recommendation)**: "
+        f"{overlap['n_high_fanout_anchors']:,} / {overlap['n_anchors_total']:,} anchors "
+        f"at or above the {overlap['high_fanout_percentile']:.0f}th percentile "
+        f"(threshold value: {overlap['high_fanout_threshold_value']:.2f} distinct partners). "
+        f"Mean RAW overlap fraction: **{overlap['overlap_fraction_mean_pct']:.2f}%** | "
+        f"clears_multi_hop_signal (informational only): **{overlap['clears_multi_hop_signal']}**."
+    )
+    if overlap.get("overlap_fraction_distribution"):
+        lines.append("\n" + _table([overlap["overlap_fraction_distribution"]], columns=["min", "p25", "p50", "p75", "p90", "max", "mean"]))
+
+    lines.append(
+        f"\n**M5b frequency-adjusted overlap diagnostic (DECISION-DRIVING)**: "
+        f"{frequency_adjusted_overlap['n_high_fanout_anchors']:,} / {frequency_adjusted_overlap['n_anchors_total']:,} anchors selected "
+        f"(rank-count selection, min_anchor_count={frequency_adjusted_overlap['min_anchor_count']}), "
+        f"{frequency_adjusted_overlap['n_anchors_with_nonempty_partner_set']:,} with a nonempty partner set.\n\n"
+        f"| mean observed overlap | mean expected overlap (null) | excess (pct points) | lift_ratio | clears_lift_signal |\n"
+        f"|---|---|---|---|---|\n"
+        f"| {frequency_adjusted_overlap['mean_observed_overlap_pct']:.2f}% | {frequency_adjusted_overlap['mean_expected_overlap_pct']:.2f}% | "
+        f"{frequency_adjusted_overlap['excess_pct_points']:+.2f} pts | **{frequency_adjusted_overlap['lift_ratio']:.2f}x** | "
+        f"**{frequency_adjusted_overlap['clears_lift_signal']}** |"
+    )
+
+    return lines
+
+
+def render_phase_e1_report(results: dict, report_path: Path) -> None:
+    split_config = results["split_config"]
+    recommendation = results["recommendation"]
+    directions = results["directions"]
+
+    lines: list[str] = []
+    lines.append("# SentinelPay -- Phase E.1 Link Sufficiency & Causal Cross-Key Fan-Out Report")
+    lines.append("")
+    lines.append(
+        "**Generated deterministically by `sentinelpay.eda.generate_report.render_phase_e1_report` "
+        "from `reports/eda/phase_e1_results.json`** -- every number below is read from that file; "
+        "re-running `python -m sentinelpay.eda.run_phase_e1` regenerates both together."
+    )
+
+    lines.append(_PHASE_E1_SCOPE_SECTION)
+
+    lines.append("## 1. Split configuration (unchanged from Phase B/C/D/D.1)\n")
+    lines.append("| partition | start_day | end_day |")
+    lines.append("|---|---|---|")
+    for name in ["train", "embargo_1", "validation", "embargo_2", "holdout"]:
+        rng = split_config[name]
+        lines.append(f"| {name} | {rng['start_day']} | {rng['end_day']} |")
+
+    lines.append("\n## 2. Holdout sealing\n")
+    lines.append(
+        f"- Total rows loaded (train_transaction.csv joined to train_identity.csv): "
+        f"**{results['n_rows_total']:,}**.\n"
+        f"- Rows filtered to `train`/`embargo_1`/`validation`/`embargo_2` "
+        f"(`sentinelpay.data.split.DEVELOPMENT_PARTITIONS`) **before** any relationship content "
+        f"analysis: **{results['n_rows_development']:,}**.\n"
+        f"- Holdout rows excluded, never touched by relationship-frame, history, or overlap "
+        f"computation: **{results['n_rows_holdout_excluded']:,}**.\n"
+        f"- `isFraud` is never loaded by `sentinelpay.eda.run_phase_e1`."
+    )
+
+    lines.append(_PHASE_E1_METHOD_SECTION)
+    lines.append(_PHASE_E1_M5_SECTION)
+
+    lines.append("\n## 3. Relationship-pair row coverage (M3, shared by both directions of each pair)\n")
+    pair_rows = [
+        {"relationship_pair": name, "n_rows_valid": r["n_rows_valid"], "pct_rows_valid": r["pct_rows_valid"]}
+        for name, r in results["relationship_pairs_row_coverage"].items()
+    ]
+    lines.append(_table(pair_rows))
+
+    lines.append("\n## 4. Per-direction results (M1-M5)\n")
+    section_titles = {
+        "payment_to_device": "4.1 payment_node -> device_node",
+        "device_to_payment": "4.2 device_node -> payment_node",
+        "payment_to_email_purchaser": "4.3 payment_node -> email_purchaser_node",
+        "email_purchaser_to_payment": "4.4 email_purchaser_node -> payment_node",
+        "device_to_email_purchaser": "4.5 device_node -> email_purchaser_node",
+        "email_purchaser_to_device": "4.6 email_purchaser_node -> device_node",
+    }
+    for key, title in section_titles.items():
+        if key in directions:
+            lines.extend(_direction_section(title, directions[key]))
+
+    lines.append("\n## 5. Recommendation\n")
+    lines.append(
+        "**Per-direction verdicts, window recommendations, and both overlap diagnostics** "
+        "(`raw_overlap_pct` is M5, descriptive only; `lift_ratio` is M5b, decision-driving):\n"
+    )
+    per_dir_rows = [
+        {
+            "direction": name,
+            "is_suitable": v["is_suitable"],
+            "recommended_window": v["recommended_window"] if v["recommended_window"] is not None else "unbounded only",
+            "raw_overlap_pct_M5_descriptive": v.get("raw_overlap_pct_descriptive_only"),
+            "lift_ratio_M5b_decision_driving": v.get("lift_ratio"),
+        }
+        for name, v in recommendation["per_direction"].items()
+    ]
+    lines.append(_table(per_dir_rows))
+
+    lines.append(
+        f"\n**recommend_union_find_for_e2: {recommendation['recommend_union_find_for_e2']}**\n\n"
+        f"{recommendation['reason']}\n\n"
+        "This is the output of `sentinelpay.eda.link_sufficiency.recommend_relationships` applied to "
+        "the measured results above -- a pure function of this run's numbers, not a preference chosen "
+        "before E.1 ran, and driven by M5b's `lift_ratio` only (M5's raw overlap is shown above for "
+        "context but never gates this boolean). It is a recommendation for a Phase E.2 scoping decision, "
+        "not an implementation: no Union-Find, component detection, scoring, or persistence exists yet "
+        "regardless of this value."
+    )
+
+    lines.append("\n## 6. Not yet analyzed (measured columns available, deferred to a follow-up pass)\n")
+    for item in results.get("not_yet_analyzed", []):
+        lines.append(f"- {item}")
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def render_phase_b_report(results: dict, report_path: Path) -> None:
     split_config = results["split_config"]
     validation_result = results["validation_result"]
