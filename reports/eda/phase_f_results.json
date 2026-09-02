@@ -1,0 +1,193 @@
+{
+  "split_config": {
+    "train": {
+      "start_day": 1,
+      "end_day": 130
+    },
+    "embargo_1": {
+      "start_day": 131,
+      "end_day": 137
+    },
+    "validation": {
+      "start_day": 138,
+      "end_day": 160
+    },
+    "embargo_2": {
+      "start_day": 161,
+      "end_day": 167
+    },
+    "holdout": {
+      "start_day": 168,
+      "end_day": 182
+    }
+  },
+  "smoothing_k": 20.0,
+  "sufficient_history_threshold": 5,
+  "n_rows_total": 590540,
+  "n_rows_development": 549899,
+  "n_rows_holdout_excluded": 40641,
+  "n_rows_missing_payment_proxy_key": 71197,
+  "n_rows_valid_key": 478702,
+  "eligible_pools": {
+    "train_pool_n_rows": 386407,
+    "train_pool_partitions": [
+      "train"
+    ],
+    "validation_pool_n_rows": 444213,
+    "validation_pool_partitions": [
+      "train",
+      "validation"
+    ]
+  },
+  "feature_summary": {
+    "train": {
+      "n_rows": 386407,
+      "payment_proxy_prior_fraud_rate_smoothed": {
+        "n_rows": 386407,
+        "n_nan": 1,
+        "min": 0.0,
+        "p25": 0.009569809988147202,
+        "p50": 0.0162331935269395,
+        "p75": 0.021787118633024096,
+        "p90": 0.035637045359270085,
+        "p99": 0.1612621869143098,
+        "max": 0.7701394385312976,
+        "mean": 0.021591558951972473
+      },
+      "payment_proxy_prior_fraud_rate_raw": {
+        "n_rows": 386407,
+        "n_nan": 34207,
+        "min": 0.0,
+        "p25": 0.0,
+        "p50": 0.0,
+        "p75": 0.01509433962264151,
+        "p90": 0.041666666666666664,
+        "p99": 0.375,
+        "max": 1.0,
+        "mean": 0.021163423635497475
+      },
+      "sufficient_target_history": {
+        "n_rows": 386407,
+        "n_true": 293901,
+        "n_false": 92506,
+        "pct_true": 76.06
+      },
+      "global_cold_start": {
+        "n_rows": 386407,
+        "n_true": 1,
+        "n_false": 386406,
+        "pct_true": 0.0003
+      }
+    },
+    "validation": {
+      "n_rows": 57806,
+      "payment_proxy_prior_fraud_rate_smoothed": {
+        "n_rows": 57806,
+        "n_nan": 0,
+        "min": 0.0004599594090802155,
+        "p25": 0.008683044150327597,
+        "p50": 0.015460142480345138,
+        "p75": 0.02420586034255569,
+        "p90": 0.04032822204784814,
+        "p99": 0.17975354916576952,
+        "max": 0.7426501699677557,
+        "mean": 0.0227189410424575
+      },
+      "payment_proxy_prior_fraud_rate_raw": {
+        "n_rows": 57806,
+        "n_nan": 1900,
+        "min": 0.0,
+        "p25": 0.0,
+        "p50": 0.0,
+        "p75": 0.022248441134306796,
+        "p90": 0.04522613065326633,
+        "p99": 0.2857142857142857,
+        "max": 1.0,
+        "mean": 0.021815924149061146
+      },
+      "sufficient_target_history": {
+        "n_rows": 57806,
+        "n_true": 51590,
+        "n_false": 6216,
+        "pct_true": 89.2468
+      },
+      "global_cold_start": {
+        "n_rows": 57806,
+        "n_true": 0,
+        "n_false": 57806,
+        "pct_true": 0.0
+      }
+    }
+  },
+  "validation_evaluation": {
+    "n_validation_rows": 57806,
+    "fraud_rate_overall": 0.0223852195273847,
+    "fraud_rate_bucket_edges": [
+      0.009569809988147202,
+      0.0162331935269395,
+      0.021787118633024096,
+      0.035637045359270085
+    ],
+    "fraud_rate_bucket_labels": [
+      "rate_lt_p25",
+      "rate_p25_to_p50",
+      "rate_p50_to_p75",
+      "rate_p75_to_p90",
+      "rate_ge_p90"
+    ],
+    "roc_auc_smoothed_rate_vs_isFraud": 0.7850043694129715,
+    "roc_auc_raw_rate_vs_isFraud": 0.7997938599809158,
+    "roc_auc_raw_rate_n_rows": 55906,
+    "fraud_rate_by_smoothed_rate_bucket": [
+      {
+        "bucket": "rate_lt_p25",
+        "n_rows": 16243,
+        "fraud_rate": 0.006402758111186358
+      },
+      {
+        "bucket": "rate_p25_to_p50",
+        "n_rows": 13956,
+        "fraud_rate": 0.008741759816566351
+      },
+      {
+        "bucket": "rate_p50_to_p75",
+        "n_rows": 8883,
+        "fraud_rate": 0.011932905549926827
+      },
+      {
+        "bucket": "rate_p75_to_p90",
+        "n_rows": 11833,
+        "fraud_rate": 0.023916166652581762
+      },
+      {
+        "bucket": "rate_ge_p90",
+        "n_rows": 6891,
+        "fraud_rate": 0.0985343201277028
+      }
+    ],
+    "fraud_rate_by_sufficient_target_history": [
+      {
+        "sufficient_target_history": true,
+        "n_rows": 51590,
+        "fraud_rate": 0.02167086644698585
+      },
+      {
+        "sufficient_target_history": false,
+        "n_rows": 6216,
+        "fraud_rate": 0.028314028314028315
+      }
+    ],
+    "sufficient_target_history_coverage": {
+      "n_rows": 57806,
+      "n_true": 51590,
+      "n_false": 6216,
+      "pct_true": 89.2468
+    },
+    "global_cold_start_coverage": {
+      "n_rows": 57806,
+      "n_true": 0,
+      "n_false": 57806,
+      "pct_true": 0.0
+    }
+  }
+}

@@ -1116,6 +1116,150 @@ def render_phase_e2_report(results: dict, report_path: Path) -> None:
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+_PHASE_F_SCOPE_SECTION = """
+## Scope (what Phase F is, and deliberately is not)
+
+Phase F is a minimal, causal, fold-safe TARGET-DERIVED historical
+fraud-rate feature for `payment_proxy_key` ONLY -- the one key D.1 evidenced
+as suitable (87.05% row coverage, 78.66% sufficiency, partition-stable,
+dominant-group robust; `device_proxy_key` failed D.1's row-coverage bar at
+20.30%). Explicitly out of scope:
+
+- **No `device_proxy_key`, no E.1/E.2 relationship-node keys, no generic
+  multi-key framework.** This module is intentionally narrow.
+- **No new causal primitive.** `sentinelpay.data.history.prior_group_amount_stats`
+  is reused UNCHANGED (called with `amount_col="isFraud"`) -- it remains
+  fully generic and is not modified; the target dependency is introduced
+  only in `sentinelpay.target_history`, a new, explicitly isolated module.
+- **Explicit source/recipient eligibility, not incidental filtering.**
+  `sentinelpay.target_history.build_eligible_pools` constructs the `train`
+  and `validation` pools explicitly; `compute_prior_fraud_rate` itself
+  RAISES if given a pool containing any partition outside the caller's
+  declared `allowed_source_partitions`. `embargo_1`/`embargo_2`/`holdout`
+  are never label sources for anyone and never receive a computed feature
+  value in this phase, regardless of chronological order.
+- **No hyperparameter tuning.** `SMOOTHING_K` and the fraud-rate bucket
+  edges below are fixed BEFORE the validation-only evaluation runs, and are
+  never reselected from its results.
+- **One-time EDA evaluation only.** No production feature, score,
+  threshold, `configs/detection.yaml`-style config, or further phase is
+  added by this script regardless of its result.
+"""
+
+
+def render_phase_f_report(results: dict, report_path: Path) -> None:
+    split_config = results["split_config"]
+    pools = results["eligible_pools"]
+    feat = results["feature_summary"]
+    ev = results["validation_evaluation"]
+
+    def _rate_table(dist: dict) -> str:
+        if "min" not in dist:
+            return f"_(no non-NaN values; n_rows={dist.get('n_rows', 0)}, n_nan={dist.get('n_nan', 0)})_\n"
+        row = {k: v for k, v in dist.items() if k not in ("n_rows", "n_nan")}
+        table = _table([row], float_fmt="{:.6f}")
+        return f"n_rows={dist['n_rows']:,} | n_nan={dist['n_nan']:,}\n\n{table}"
+
+    lines: list[str] = []
+    lines.append("# SentinelPay -- Phase F Causal Target-Derived Historical Fraud-Rate Feature Report")
+    lines.append("")
+    lines.append(
+        "**Generated deterministically by `sentinelpay.eda.generate_report.render_phase_f_report` "
+        "from `reports/eda/phase_f_results.json`** -- every number below is read from that file; "
+        "re-running `python -m sentinelpay.eda.run_phase_f` regenerates both together."
+    )
+
+    lines.append(_PHASE_F_SCOPE_SECTION)
+
+    lines.append("## 1. Split configuration (unchanged from Phase B/C/D/D.1/E.1/E.2)\n")
+    lines.append("| partition | start_day | end_day |")
+    lines.append("|---|---|---|")
+    for name in ["train", "embargo_1", "validation", "embargo_2", "holdout"]:
+        rng = split_config[name]
+        lines.append(f"| {name} | {rng['start_day']} | {rng['end_day']} |")
+
+    lines.append("\n## 2. Holdout sealing\n")
+    lines.append(
+        f"- Total rows loaded (train_transaction.csv): **{results['n_rows_total']:,}**.\n"
+        f"- Rows filtered to `train`/`embargo_1`/`validation`/`embargo_2` **before** any key-building or "
+        f"history computation: **{results['n_rows_development']:,}**.\n"
+        f"- Holdout rows excluded, never touched: **{results['n_rows_holdout_excluded']:,}**.\n"
+        f"- `payment_proxy_key` present on **{results['n_rows_valid_key']:,}** / {results['n_rows_development']:,} "
+        f"development rows (**{results['n_rows_missing_payment_proxy_key']:,}** excluded, missing a key component).\n"
+        f"- `isFraud` IS loaded as a feature input in this phase (the first phase where that's true) -- "
+        f"see scope section above for what remains unchanged (no out-of-order use, no hyperparameter tuning)."
+    )
+
+    lines.append("\n## 3. Explicit eligible pools (source/recipient contract)\n")
+    lines.append(
+        f"- `train_pool`: **{pools['train_pool_n_rows']:,}** rows, partitions present: `{pools['train_pool_partitions']}`.\n"
+        f"- `validation_pool`: **{pools['validation_pool_n_rows']:,}** rows, partitions present: "
+        f"`{pools['validation_pool_partitions']}`.\n"
+        f"- `embargo_1`/`embargo_2`/`holdout` are absent from both pools BY CONSTRUCTION "
+        f"(`sentinelpay.target_history.build_eligible_pools`), not by incidental filtering."
+    )
+
+    lines.append(f"\n## 4. Fixed hyperparameters (declared before validation-only evaluation)\n")
+    lines.append(
+        f"- `SMOOTHING_K` = **{results['smoothing_k']}** (project-consistency value, NOT a derived statistical "
+        f"equivalence to any other constant -- see `sentinelpay.target_history` module docstring).\n"
+        f"- `SUFFICIENT_HISTORY_THRESHOLD` (diagnostic only) = **{results['sufficient_history_threshold']}**.\n"
+        f"- `fraud_rate_bucket_edges` (from TRAIN's own smoothed-rate p25/p50/p75/p90, never validation's): "
+        f"`{ev['fraud_rate_bucket_edges']}` -> {ev['fraud_rate_bucket_labels']}"
+    )
+
+    lines.append("\n## 5. Feature descriptive summary (non-circular: train uses only train's own prior history)\n")
+    for partition in ("train", "validation"):
+        s = feat[partition]
+        lines.append(f"### {partition} (n_rows={s['n_rows']:,})\n")
+        lines.append("**payment_proxy_prior_fraud_rate_smoothed:**\n")
+        lines.append(_rate_table(s["payment_proxy_prior_fraud_rate_smoothed"]))
+        lines.append("**payment_proxy_prior_fraud_rate_raw:**\n")
+        lines.append(_rate_table(s["payment_proxy_prior_fraud_rate_raw"]))
+        sh = s["sufficient_target_history"]
+        gc = s["global_cold_start"]
+        lines.append(
+            f"**sufficient_target_history:** n_true={sh['n_true']:,} | n_false={sh['n_false']:,} | "
+            f"pct_true={sh['pct_true']:.4f}%\n\n"
+            f"**global_cold_start:** n_true={gc['n_true']:,} | n_false={gc['n_false']:,} | "
+            f"pct_true={gc['pct_true']:.4f}%\n"
+        )
+
+    lines.append("\n## 6. Strict validation-only evaluation (isFraud, descriptive evidence only)\n")
+    lines.append(
+        f"`n_validation_rows`: **{ev['n_validation_rows']:,}** | overall fraud rate: "
+        f"**{ev['fraud_rate_overall']:.6f}**\n\n"
+        f"- `roc_auc_smoothed_rate_vs_isFraud`: **{ev['roc_auc_smoothed_rate_vs_isFraud']:.4f}** "
+        f"(n={ev['n_validation_rows']:,})\n"
+        f"- `roc_auc_raw_rate_vs_isFraud`: **{ev['roc_auc_raw_rate_vs_isFraud']:.4f}** "
+        f"(n={ev['roc_auc_raw_rate_n_rows']:,} -- raw rate is NaN at per-key cold start, a smaller, "
+        f"DIFFERENT population than the smoothed-rate AUC above; not directly comparable row-for-row).\n"
+    )
+    lines.append("**Fraud rate by fixed `payment_proxy_prior_fraud_rate_smoothed` bucket:**\n")
+    lines.append(_table(ev["fraud_rate_by_smoothed_rate_bucket"], float_fmt="{:.6f}"))
+    lines.append("**Fraud rate by `sufficient_target_history`:**\n")
+    lines.append(_table(ev["fraud_rate_by_sufficient_target_history"], float_fmt="{:.6f}"))
+    sh_cov = ev["sufficient_target_history_coverage"]
+    gc_cov = ev["global_cold_start_coverage"]
+    lines.append(
+        f"\n**sufficient_target_history coverage (validation):** n_true={sh_cov['n_true']:,} | "
+        f"n_false={sh_cov['n_false']:,} | pct_true={sh_cov['pct_true']:.4f}%\n\n"
+        f"**global_cold_start coverage (validation):** n_true={gc_cov['n_true']:,} | "
+        f"n_false={gc_cov['n_false']:,} | pct_true={gc_cov['pct_true']:.4f}%\n"
+    )
+
+    lines.append(
+        "\n## 7. No production feature, scoring model, or further phase\n\n"
+        "Nothing in this report is a production feature, score, threshold, `configs/detection.yaml`-style "
+        "config, or further phase work -- this is a one-time EDA measurement + validation-only evaluation "
+        "only. `SMOOTHING_K` and the fraud-rate bucket edges above were fixed before this evaluation ran and "
+        "were not reselected from its results.\n"
+    )
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def render_phase_b_report(results: dict, report_path: Path) -> None:
     split_config = results["split_config"]
     validation_result = results["validation_result"]
