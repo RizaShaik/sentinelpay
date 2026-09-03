@@ -1,0 +1,30 @@
+{
+  "model_fit_source": "train partition ONLY (Phase G/H regime) -- see sentinelpay.inference.artifacts",
+  "phase_d_state_source": "all five partitions (train, embargo_1, validation, embargo_2, holdout) -- unrestricted, matches Phase D's own non-target semantics",
+  "phase_f_state_source": "train + validation + holdout ONLY -- matches Phase F's frozen target-history contract",
+  "phase_f_embargo_partitions_excluded": [
+    "embargo_1",
+    "embargo_2"
+  ],
+  "phase_d_partitions_included": [
+    "embargo_1",
+    "embargo_2",
+    "holdout",
+    "train",
+    "validation"
+  ],
+  "phase_f_update_policy": "resolution-only -- a transaction contributes to Phase F counters ONLY via update_resolved_labels, never at occurrence. IEEE-CIS has no real label_resolved_at field; this models resolution as happening at the moment update-resolved is invoked, not any true confirmation time.",
+  "holdout_usage_note": "holdout labels are incorporated here ONLY as resolved historical state for this forward-looking inference system. Phase H's sealed evaluation (reports/eda/phase_h_results.json) is complete and was NOT rerun; this state was NOT used to select a model, scaler, feature, or threshold.",
+  "n_rows_total_loaded": 590540,
+  "n_rows_phase_d_buffer": 514656,
+  "n_keys_phase_f": 37184,
+  "n_ids_phase_d_observed": 514656,
+  "n_ids_phase_f_resolved": 480167,
+  "built_at_utc": "2026-09-03T14:19:31.081857+00:00",
+  "phase_f_global_fraud_count": 11775,
+  "phase_f_global_event_count": 480167,
+  "last_observed_update_utc": "2026-09-03T14:23:18.519105+00:00",
+  "n_duplicate_ids_skipped_last_observed_update": 1,
+  "last_resolved_update_utc": "2026-09-03T14:24:08.621411+00:00",
+  "n_duplicate_ids_skipped_last_resolved_update": 1
+}
