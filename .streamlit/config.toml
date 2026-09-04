@@ -1,0 +1,11 @@
+# Native Streamlit theme -- makes native chart elements (st.bar_chart,
+# st.line_chart, etc.) and widgets render with the SentinelPay dark
+# palette automatically, instead of Vega-Lite's light-theme default.
+# Colors mirror the CSS custom properties in app.py's injected stylesheet.
+[theme]
+base = "dark"
+primaryColor = "#4C8DFF"
+backgroundColor = "#0A0F1C"
+secondaryBackgroundColor = "#121A2C"
+textColor = "#E7ECF3"
+font = "sans serif"
