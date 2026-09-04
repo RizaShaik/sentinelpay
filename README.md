@@ -24,6 +24,20 @@ Validated once, on a sealed holdout set the model never saw during training or f
 
 *(Baseline: ROC-AUC 0.700 / PR-AUC 0.053 — transaction attributes only, no behavioral or historical signal. Source: `reports/eda/phase_h_results.json`.)*
 
+## Application Demo
+
+### Overview
+
+![SentinelPay Overview](assets/overview.png)
+
+### Payment Investigation
+
+![Payment Investigation](assets/investigation.png)
+
+### Adaptive Fraud Intelligence Update
+
+![Fraud Intelligence Update](assets/fraud-update.png)
+
 ## How It Works
 
 Every transaction moves through five stages on the "Investigate a Payment" page:
