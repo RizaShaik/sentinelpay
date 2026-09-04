@@ -475,11 +475,11 @@ def render_score_result(result, txn_id: int) -> None:
     # --- Step 3: Historical Intelligence -------------------------------- #
     st.markdown('<span class="sp-step-badge">Step 3 &middot; Historical Intelligence</span>', unsafe_allow_html=True)
     identity_label = (
-        f"Established identity &middot; {prior_events} resolved prior event(s)"
+        f"Established history &middot; {prior_events} resolved event(s)"
         if sufficient
         else f"Limited identity history &middot; {prior_events} resolved prior event(s)"
     )
-    identity_tone = "good" if sufficient else "warn"
+    identity_tone = "neutral" if sufficient else "warn"
     chips_html = chip(identity_label, identity_tone)
     if cold_start:
         chips_html += chip("No resolved history in the system at all", "neutral")
@@ -492,9 +492,14 @@ def render_score_result(result, txn_id: int) -> None:
             ("Population baseline rate", fmt_rate(f["global_prior_fraud_rate"])),
         ]
     )
-    st.caption(
-        f"Smoothed toward the population baseline when history is limited: **{fmt_pct(hist_rate)}**."
-    )
+    if sufficient:
+        st.caption(
+            f"This identity has enough resolved history to be weighted on its own record: **{fmt_pct(hist_rate)}**."
+        )
+    else:
+        st.caption(
+            f"Smoothed toward the population baseline since this identity has limited history: **{fmt_pct(hist_rate)}**."
+        )
 
     st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
 
@@ -697,7 +702,10 @@ def render_investigate_payment() -> None:
                     txn_id = st.number_input("Transaction ID", value=int(CUSTOM_DEFAULT["TransactionID"]), step=1)
                     dt = st.number_input("Transaction time (TransactionDT)", value=int(CUSTOM_DEFAULT["TransactionDT"]), step=1)
                     amt = st.number_input("Transaction amount", value=float(CUSTOM_DEFAULT["TransactionAmt"]))
-                    has_identity = st.selectbox("Device/identity data available", [0, 1], index=int(CUSTOM_DEFAULT["has_identity"]))
+                    has_identity = st.selectbox(
+                        "Device/identity data available", [0, 1],
+                        index=int(CUSTOM_DEFAULT["has_identity"]), format_func=lambda x: "Yes" if x else "No",
+                    )
                 with col2:
                     st.caption("Payment identity components (anonymized card/address attributes)")
                     card1 = st.number_input("card1", value=int(CUSTOM_DEFAULT["card1"]), step=1)
