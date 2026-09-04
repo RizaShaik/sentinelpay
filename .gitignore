@@ -17,3 +17,6 @@ dist/
 # Large local datasets
 data/raw/
 *.csv
+
+# Runtime-generated state (Streamlit dashboard sandbox copy, see ui_state.py)
+artifacts/inference/_demo_scratch_state/

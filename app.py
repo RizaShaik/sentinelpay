@@ -17,8 +17,16 @@ UI says so rather than presenting it as a working feature.
 
 The sandbox/scratch-state safety mechanism from the previous revision is
 preserved internally (see `ui_state.py`) but demoted to a small "Sandbox
-environment" control on the Operations page -- it is no longer the
-headline UI concept.
+environment" control on the Intelligence Lifecycle page -- it is no longer
+the headline UI concept.
+
+Navigation and page layout follow the product story explicitly: investigate
+a payment -> understand its behavioral context -> understand its historical
+intelligence -> see the fused adaptive risk assessment -> update the
+intelligence lifecycle so future scores reflect this outcome. Every number
+in that flow is still read directly off `ScoreResult`/`InferenceState` --
+only the presentation order and labeling changed from the previous
+research-dashboard layout.
 
 Run with:
     .venv\\Scripts\\streamlit.exe run app.py
@@ -97,7 +105,7 @@ CUSTOM_DEFAULT = {
     "addr1": 200.0,
 }
 
-NAV_PAGES = ["Overview", "Transaction Intelligence", "Threat Intelligence", "Operations"]
+NAV_PAGES = ["Overview", "Investigate a Payment", "Threat Intelligence", "Intelligence Lifecycle"]
 
 
 # --------------------------------------------------------------------- #
@@ -120,6 +128,8 @@ def init_session_state() -> None:
         st.session_state.state = load_scratch_state()
     if "last_scored" not in st.session_state:
         st.session_state.last_scored = None
+    if "last_result" not in st.session_state:
+        st.session_state.last_result = None
     if "score_version" not in st.session_state:
         st.session_state.score_version = 0
     if "activity_log" not in st.session_state:
@@ -241,6 +251,18 @@ html, body, [class*="css"] { font-family: 'Inter', -apple-system, BlinkMacSystem
 .sp-param-table td:first-child { color: var(--sp-muted); }
 .sp-param-table td:last-child { color: #fff; font-family: 'JetBrains Mono', monospace; text-align: right; }
 
+.sp-step-badge { display:inline-block; padding: 3px 10px; border-radius: 6px; background: var(--sp-neutral-bg); color: var(--sp-accent); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 10px; }
+
+.sp-flow-strip { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom: 1.4rem; }
+.sp-flow-step { display:flex; align-items:center; gap:8px; background: var(--sp-panel); border:1px solid var(--sp-border); border-radius:10px; padding:8px 14px; font-size:0.82rem; font-weight:600; color: var(--sp-text); }
+.sp-flow-num { display:flex; align-items:center; justify-content:center; width:20px; height:20px; min-width:20px; border-radius:50%; background: var(--sp-accent); color:#fff; font-size:0.72rem; font-weight:700; }
+.sp-flow-arrow { color: var(--sp-muted); font-size:0.9rem; }
+
+.sp-stat-row { display:flex; flex-wrap:wrap; gap:26px; margin: 10px 0 4px 0; }
+.sp-stat { display:flex; flex-direction:column; gap:2px; }
+.sp-stat-label { font-size:0.72rem; color:var(--sp-muted); text-transform:uppercase; letter-spacing:0.03em; }
+.sp-stat-value { font-size:1.05rem; font-weight:700; color:#fff; font-family:'JetBrains Mono', monospace; }
+
 .stButton>button, .stFormSubmitButton>button {
     border-radius: 9px;
     border: 1px solid var(--sp-border);
@@ -275,6 +297,36 @@ def fmt_int(n) -> str:
 
 def fmt_pct(x: float, decimals: int = 2) -> str:
     return f"{x * 100:.{decimals}f}%"
+
+
+def fmt_amt(x) -> str:
+    return "—" if x is None else f"${x:,.2f}"
+
+
+def fmt_num(x, decimals: int = 2) -> str:
+    return "—" if x is None else f"{x:.{decimals}f}"
+
+
+def fmt_rate(x) -> str:
+    return "—" if x is None else fmt_pct(x)
+
+
+def stat_row(items: list[tuple[str, str]]) -> None:
+    html = ['<div class="sp-stat-row">']
+    for label, value in items:
+        html.append(f'<div class="sp-stat"><div class="sp-stat-label">{label}</div><div class="sp-stat-value">{value}</div></div>')
+    html.append("</div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
+def flow_strip(steps: list[str]) -> None:
+    parts = ['<div class="sp-flow-strip">']
+    for i, s in enumerate(steps, start=1):
+        parts.append(f'<div class="sp-flow-step"><span class="sp-flow-num">{i}</span>{s}</div>')
+        if i < len(steps):
+            parts.append('<span class="sp-flow-arrow">&rarr;</span>')
+    parts.append("</div>")
+    st.markdown("".join(parts), unsafe_allow_html=True)
 
 
 def kpi_grid(cards: list[dict]) -> None:
@@ -348,34 +400,105 @@ def log_activity(result, txn_id: int) -> None:
     st.session_state.activity_log = st.session_state.activity_log[:8]
 
 
-def render_score_result(result, txn_id: int) -> None:
-    d_flag = result.phase_d_diagnostics["flag"]
-    behavior_label, behavior_tone = BEHAVIOR_COPY.get(d_flag, (d_flag, "neutral"))
-    sufficient = bool(result.phase_f_diagnostics["sufficient_target_history"])
-    prior_events = result.phase_f_diagnostics["payment_proxy_prior_event_count"]
-    hist_rate = result.phase_f_diagnostics["payment_proxy_prior_fraud_rate_smoothed"]
-    cold_start = bool(result.phase_f_diagnostics["global_cold_start"])
-
+def render_lifecycle_actions(txn_id: int) -> None:
+    st.markdown('<span class="sp-step-badge">Step 5 &middot; Update Intelligence Lifecycle</span>', unsafe_allow_html=True)
     st.markdown(
-        f'<div class="sp-prob-hero"><span class="sp-prob-value">{fmt_pct(result.fraud_probability)}</span>'
-        f'<span class="sp-prob-label">model fraud probability</span></div>',
+        '<div class="sp-card-title" style="font-size:0.92rem">Feed this outcome back into SentinelPay</div>'
+        '<div class="sp-card-body">Recording and resolving are the mechanism by which Step 2 and Step 3\'s '
+        "signals stay current -- future scores for this identity reflect what happens here. Resubmitting the "
+        "same Transaction ID is always a safe no-op.</div>",
         unsafe_allow_html=True,
     )
+    txn = st.session_state.last_scored
+    v = st.session_state.score_version
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.caption("Record occurrence -- updates this identity's behavioral context (Step 2).")
+        if st.button("Record this transaction", key=f"lifecycle_record_{txn_id}_{v}"):
+            new_state, n_new, n_dup = record_observed(st.session_state.state, [txn])
+            st.session_state.state = new_state
+            st.success(f"{n_new} transaction newly recorded, {n_dup} duplicate(s) skipped.")
+    with col_b:
+        st.caption("Resolve outcome -- updates this identity's historical intelligence (Step 3).")
+        outcome = st.selectbox(
+            "Confirmed outcome",
+            [0, 1],
+            format_func=lambda x: "Fraudulent" if x else "Legitimate",
+            key=f"lifecycle_outcome_{txn_id}_{v}",
+            label_visibility="collapsed",
+        )
+        if st.button("Resolve this transaction", key=f"lifecycle_resolve_{txn_id}_{v}"):
+            record = {**txn, "isFraud": int(outcome)}
+            new_state, n_new, n_dup = resolve_transaction(st.session_state.state, [record])
+            st.session_state.state = new_state
+            st.success(f"{n_new} outcome newly resolved, {n_dup} duplicate(s) skipped.")
 
+
+def render_score_result(result, txn_id: int) -> None:
+    d = result.phase_d_diagnostics
+    f = result.phase_f_diagnostics
+    d_flag = d["flag"]
+    behavior_label, behavior_tone = BEHAVIOR_COPY.get(d_flag, (d_flag, "neutral"))
+    sufficient = bool(f["sufficient_target_history"])
+    prior_events = f["payment_proxy_prior_event_count"]
+    prior_fraud = f["payment_proxy_prior_fraud_count"]
+    hist_rate = f["payment_proxy_prior_fraud_rate_smoothed"]
+    cold_start = bool(f["global_cold_start"])
+
+    # --- Step 2: Behavioral Context ------------------------------------ #
+    st.markdown('<span class="sp-step-badge">Step 2 &middot; Behavioral Context</span>', unsafe_allow_html=True)
+    st.markdown(chip(behavior_label, behavior_tone), unsafe_allow_html=True)
+    stat_row(
+        [
+            ("Modified z-score", fmt_num(d["modified_zscore"])),
+            ("Prior transactions in window", fmt_int(d["prior_count_in_window"])),
+            ("Prior median amount", fmt_amt(d["prior_median"])),
+            ("Prior amount variability (MAD)", fmt_amt(d["prior_mad"])),
+        ]
+    )
+    st.caption(
+        "Compares this transaction against this payment identity's own recent spending window -- not a "
+        "one-size-fits-all population rule."
+    )
+
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+
+    # --- Step 3: Historical Intelligence -------------------------------- #
+    st.markdown('<span class="sp-step-badge">Step 3 &middot; Historical Intelligence</span>', unsafe_allow_html=True)
     identity_label = (
         f"Established identity &middot; {prior_events} resolved prior event(s)"
         if sufficient
         else f"Limited identity history &middot; {prior_events} resolved prior event(s)"
     )
     identity_tone = "good" if sufficient else "warn"
-    chips_html = chip(behavior_label, behavior_tone) + chip(identity_label, identity_tone)
+    chips_html = chip(identity_label, identity_tone)
     if cold_start:
         chips_html += chip("No resolved history in the system at all", "neutral")
     st.markdown(chips_html, unsafe_allow_html=True)
-
+    stat_row(
+        [
+            ("Resolved prior fraud cases", fmt_int(prior_fraud)),
+            ("Resolved prior events", fmt_int(prior_events)),
+            ("Raw historical rate", fmt_rate(f["payment_proxy_prior_fraud_rate_raw"])),
+            ("Population baseline rate", fmt_rate(f["global_prior_fraud_rate"])),
+        ]
+    )
     st.caption(
-        f"Historical fraud-rate estimate for this identity (smoothed toward the population baseline "
-        f"when history is limited): **{fmt_pct(hist_rate)}**."
+        f"Smoothed toward the population baseline when history is limited: **{fmt_pct(hist_rate)}**."
+    )
+
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+
+    # --- Step 4: Adaptive Risk Assessment -------------------------------- #
+    st.markdown('<span class="sp-step-badge">Step 4 &middot; Adaptive Risk Assessment</span>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="sp-prob-hero"><span class="sp-prob-value">{fmt_pct(result.fraud_probability)}</span>'
+        f'<span class="sp-prob-label">model fraud probability</span></div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Fuses the behavioral signal (Step 2) and the historical intelligence signal (Step 3) through "
+        "SentinelPay's validated F2 model -- see Threat Intelligence for how it was built and validated."
     )
 
     with st.expander("Technical details"):
@@ -383,10 +506,10 @@ def render_score_result(result, txn_id: int) -> None:
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("**Behavioral diagnostics**")
-            st.json(result.phase_d_diagnostics)
+            st.json(d)
         with col_b:
             st.markdown("**Historical intelligence diagnostics**")
-            st.json(result.phase_f_diagnostics)
+            st.json(f)
         st.markdown("**Model features (exact values passed to the classifier)**")
         st.dataframe(
             {"feature": list(result.features.keys()), "value": list(result.features.values())},
@@ -394,7 +517,8 @@ def render_score_result(result, txn_id: int) -> None:
             hide_index=True,
         )
 
-    log_activity(result, txn_id)
+    st.markdown("<div style='height:1.1rem'></div>", unsafe_allow_html=True)
+    render_lifecycle_actions(txn_id)
 
 
 # ======================================================================= #
@@ -436,14 +560,25 @@ def render_overview() -> None:
         ]
     )
 
+    section_header("The SentinelPay Workflow", "Every payment moves through the same five stages")
+    flow_strip(
+        [
+            "Investigate a Payment",
+            "Behavioral Context",
+            "Historical Intelligence",
+            "Adaptive Risk Assessment",
+            "Intelligence Lifecycle",
+        ]
+    )
+
     col1, col2 = st.columns([3, 2])
     with col1:
         with st.container(border=True):
-            section_header("How SentinelPay Adapts", "Three signals, fused per transaction, no manual rule authoring")
-            c1, c2, c3 = st.columns(3)
+            section_header("How SentinelPay Adapts", "Four signals, one continuously updating intelligence loop")
+            c1, c2, c3, c4 = st.columns(4)
             with c1:
                 st.markdown(
-                    '<div class="sp-card-title" style="font-size:0.92rem">Behavioral Monitoring</div>'
+                    '<div class="sp-card-title" style="font-size:0.88rem">Behavioral Context</div>'
                     '<div class="sp-card-body">Every payment identity has a running profile of its own recent '
                     'spending pattern. A new transaction is compared against that identity\'s own history, not a '
                     'one-size-fits-all rule.</div>',
@@ -451,7 +586,7 @@ def render_overview() -> None:
                 )
             with c2:
                 st.markdown(
-                    '<div class="sp-card-title" style="font-size:0.92rem">Historical Intelligence</div>'
+                    '<div class="sp-card-title" style="font-size:0.88rem">Historical Intelligence</div>'
                     '<div class="sp-card-body">Confirmed fraud outcomes continuously update each identity\'s risk '
                     'profile. Identities with little history fall back toward the population baseline instead of '
                     'an unreliable individual estimate.</div>',
@@ -459,16 +594,23 @@ def render_overview() -> None:
                 )
             with c3:
                 st.markdown(
-                    '<div class="sp-card-title" style="font-size:0.92rem">Adaptive Fusion</div>'
+                    '<div class="sp-card-title" style="font-size:0.88rem">Adaptive Risk Assessment</div>'
                     '<div class="sp-card-body">Both signals feed one model, validated on a sealed holdout set the '
                     'system never trained or tuned on -- so the reported lift reflects genuinely unseen data.</div>',
+                    unsafe_allow_html=True,
+                )
+            with c4:
+                st.markdown(
+                    '<div class="sp-card-title" style="font-size:0.88rem">Intelligence Lifecycle</div>'
+                    '<div class="sp-card-body">Recording occurrences and resolving outcomes feeds straight back '
+                    "into Steps 2 and 3, so behavioral context and historical intelligence both keep improving.</div>",
                     unsafe_allow_html=True,
                 )
     with col2:
         with st.container(border=True):
             section_header("Recent Session Activity", "Transactions analyzed in this session")
             if not st.session_state.activity_log:
-                st.caption("No transactions analyzed yet. Visit Transaction Intelligence to run one.")
+                st.caption("No transactions analyzed yet. Visit Investigate a Payment to run one.")
             else:
                 rows = []
                 for entry in st.session_state.activity_log:
@@ -480,13 +622,15 @@ def render_overview() -> None:
 
 
 # ======================================================================= #
-# Page: Transaction Intelligence
+# Page: Investigate a Payment
 # ======================================================================= #
-def render_transaction_intelligence() -> None:
+def render_investigate_payment() -> None:
     section_header(
-        "Transaction Intelligence",
-        "Analyze a transaction against SentinelPay's live behavioral and historical signals.",
+        "Investigate a Payment",
+        "Walk a transaction through SentinelPay's behavioral context, historical intelligence, adaptive risk "
+        "assessment, and intelligence-lifecycle update -- in that order.",
     )
+    st.markdown('<span class="sp-step-badge">Step 1 &middot; Investigate a Payment</span>', unsafe_allow_html=True)
 
     if "txn_mode" not in st.session_state:
         st.session_state.txn_mode = None
@@ -530,9 +674,9 @@ def render_transaction_intelligence() -> None:
         transaction = {k: v for k, v in defaults.items() if k != "TransactionID"}
         result = score_transaction(transaction, st.session_state.state, artifact, detection_config, config)
         st.session_state.last_scored = dict(defaults)
+        st.session_state.last_result = result
         st.session_state.score_version += 1
-        with st.container(border=True):
-            render_score_result(result, defaults["TransactionID"])
+        log_activity(result, defaults["TransactionID"])
         st.session_state.txn_mode = None
 
     elif st.session_state.txn_mode == "custom":
@@ -566,9 +710,14 @@ def render_transaction_intelligence() -> None:
                 }
                 result = score_transaction(transaction, st.session_state.state, artifact, detection_config, config)
                 st.session_state.last_scored = {"TransactionID": int(txn_id), **transaction}
+                st.session_state.last_result = result
                 st.session_state.score_version += 1
-                st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
-                render_score_result(result, int(txn_id))
+                log_activity(result, int(txn_id))
+
+    if st.session_state.last_result is not None:
+        st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
+        with st.container(border=True):
+            render_score_result(st.session_state.last_result, st.session_state.last_scored["TransactionID"])
 
 
 # ======================================================================= #
@@ -668,12 +817,13 @@ def render_threat_intelligence() -> None:
 
 
 # ======================================================================= #
-# Page: Operations
+# Page: Intelligence Lifecycle
 # ======================================================================= #
-def render_operations() -> None:
+def render_intelligence_lifecycle() -> None:
     section_header(
-        "Operations",
-        "Transaction lifecycle management -- record occurrences, resolve confirmed outcomes.",
+        "Intelligence Lifecycle",
+        "Step 5 of the workflow, available standalone: record occurrences and resolve confirmed outcomes for "
+        "any transaction, not only one just investigated above.",
     )
 
     col1, col2 = st.columns(2)
@@ -766,6 +916,7 @@ def render_operations() -> None:
             reset_scratch_state()
             st.session_state.state = load_scratch_state()
             st.session_state.last_scored = None
+            st.session_state.last_result = None
             st.session_state.flash_message = "Sandbox reset to the production snapshot."
             st.rerun()
 
@@ -775,8 +926,8 @@ def render_operations() -> None:
 # --------------------------------------------------------------------- #
 PAGE_RENDERERS = {
     "Overview": render_overview,
-    "Transaction Intelligence": render_transaction_intelligence,
+    "Investigate a Payment": render_investigate_payment,
     "Threat Intelligence": render_threat_intelligence,
-    "Operations": render_operations,
+    "Intelligence Lifecycle": render_intelligence_lifecycle,
 }
 PAGE_RENDERERS[st.session_state.nav_page]()
