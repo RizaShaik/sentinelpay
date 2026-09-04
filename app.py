@@ -34,6 +34,7 @@ Run with:
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import streamlit as st
@@ -299,8 +300,16 @@ def fmt_pct(x: float, decimals: int = 2) -> str:
     return f"{x * 100:.{decimals}f}%"
 
 
-def fmt_amt(x) -> str:
-    return "—" if x is None else f"${x:,.2f}"
+def fmt_amt_from_log1p(x) -> str:
+    """Converts a log1p(amount)-space value (e.g. phase_d_diagnostics'
+    prior_median -- see sentinelpay.data.history.prior_group_windowed_robust_stats,
+    which computes it as np.median over amt_log1p, never raw dollars) back to
+    a real dollar figure via expm1. Valid ONLY because the median commutes
+    with any strictly monotonic transform (median(log1p(x)) == log1p(median(x)));
+    this must NOT be used for prior_mad, a spread statistic that does not
+    commute with a nonlinear transform and has no valid direct dollar
+    conversion."""
+    return "—" if x is None else f"${math.expm1(x):,.2f}"
 
 
 def fmt_num(x, decimals: int = 2) -> str:
@@ -452,8 +461,8 @@ def render_score_result(result, txn_id: int) -> None:
         [
             ("Modified z-score", fmt_num(d["modified_zscore"])),
             ("Prior transactions in window", fmt_int(d["prior_count_in_window"])),
-            ("Prior median amount", fmt_amt(d["prior_median"])),
-            ("Prior amount variability (MAD)", fmt_amt(d["prior_mad"])),
+            ("Prior median amount", fmt_amt_from_log1p(d["prior_median"])),
+            ("Prior amount variability (log-scale MAD)", fmt_num(d["prior_mad"], 3)),
         ]
     )
     st.caption(
